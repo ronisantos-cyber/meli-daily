@@ -504,6 +504,25 @@
     </div>
   </div>
 
+  <!-- Escolha de grupo no primeiro login -->
+  <div class="login-shade" id="groupPickShade">
+    <div class="login-card">
+      <img class="login-logo" id="groupPickLogo" alt="" src="">
+      <h2>Escolha seu grupo</h2>
+      <p>Selecione seu <strong>setor</strong>, <strong>área</strong> e <strong>turno</strong>. Você pode trocar depois nas configurações.</p>
+      <div style="text-align:left;margin-bottom:10px">
+        <label style="font-size:12px;color:var(--ink-2)">Setor</label>
+        <select id="pkSetor" class="group-select" style="width:100%;margin:3px 0 8px"></select>
+        <label style="font-size:12px;color:var(--ink-2)">Área</label>
+        <select id="pkArea" class="group-select" style="width:100%;margin:3px 0 8px"></select>
+        <label style="font-size:12px;color:var(--ink-2)">Turno</label>
+        <select id="pkTurno" class="group-select" style="width:100%;margin:3px 0 4px"></select>
+      </div>
+      <button id="pkConfirm">Entrar no grupo</button>
+      <div class="login-msg" id="pkMsg"></div>
+    </div>
+  </div>
+
   <div class="statusbar">
     <span id="clock">9:41</span>
     <span>● ● ●</span>
@@ -2520,8 +2539,15 @@ const SB = (function(){
   }
   async function addFolgaRow(data, nomes, motivo){
     const m=me();
-    const { error } = await client.from("folgas").insert({ grupo_id:state.groupId, data, nomes, motivo:motivo||null, author_email:m.email, author_nome:m.nome });
-    if(error) throw error;
+    const row={ grupo_id:state.groupId, data, nomes, author_email:m.email, author_nome:m.nome };
+    if(motivo) row.motivo=motivo;
+    let res = await client.from("folgas").insert(row);
+    // Se a coluna 'motivo' ainda não existe no banco, tenta de novo sem ela.
+    if(res.error && /motivo/i.test(res.error.message||"")){
+      delete row.motivo;
+      res = await client.from("folgas").insert(row);
+    }
+    if(res.error) throw res.error;
   }
   async function setFolgaStatus(id, status){
     const m=me();
@@ -2896,9 +2922,19 @@ function addFolgaGroup(){
   const nomes=parseNames(folgaNamesInputEl.value||"");
   const motivoEl=document.getElementById("folgaMotivoInput");
   const motivo=(motivoEl && motivoEl.value||"").trim();
+  function folgaErr(msg){
+    if(folgasListEl){
+      const b=document.createElement("div");
+      b.style.cssText="background:#FEE2E2;color:#991B1B;border:1px solid #F87171;border-radius:8px;padding:8px 10px;margin:0 4px 8px;font-size:12.5px";
+      b.textContent="Erro ao salvar folga: "+msg;
+      folgasListEl.prepend(b);
+      setTimeout(()=>{ if(b.parentNode) b.remove(); }, 8000);
+    }
+    sysChat("Erro ao salvar folga: "+msg);
+  }
   SB.addFolgaRow(date, nomes, motivo).then(refreshGroupAndRender)
     .then(()=>{ sysChat(`Folga de ${nomes.join(", ")||"(sem nomes)"} (${formatPretty(date)}) criada — pendente.`); folgaNamesInputEl.value=""; if(motivoEl) motivoEl.value=""; folgaNamesInputEl.focus(); })
-    .catch(e=>sysChat("Erro ao salvar folga: "+sbErrMsg(e)));
+    .catch(e=>folgaErr(sbErrMsg(e)));
 }
 
 /* ---------- barra de grupo: sempre oculta (troca só nas configurações) ---------- */
@@ -2966,6 +3002,42 @@ async function applyGroupSelection(){
   if(active===2) renderFolgasView();
 }
 
+/* ---- Tela de escolha de grupo (primeiro login) ---- */
+function showGroupPicker(){
+  const shadeEl=document.getElementById("groupPickShade"); if(!shadeEl) return;
+  const av=document.querySelector(".header .avatar img"), ll=document.getElementById("groupPickLogo");
+  if(av && ll) ll.src=av.src;
+  const sSet=document.getElementById("pkSetor"), sAr=document.getElementById("pkArea"), sTu=document.getElementById("pkTurno");
+  const setors=Object.keys(GROUP_TREE);
+  sSet.innerHTML=setors.map(s=>`<option value="${s}">${s}</option>`).join("");
+  function fillAreas(){
+    const areas=Object.keys(GROUP_TREE[sSet.value]||{});
+    sAr.innerHTML=areas.map(a=>`<option value="${a}">${a}</option>`).join("");
+    fillTurnos();
+  }
+  function fillTurnos(){
+    const turnos=(GROUP_TREE[sSet.value] && GROUP_TREE[sSet.value][sAr.value])||[];
+    sTu.innerHTML=turnos.map(t=>`<option value="${t}">${t}</option>`).join("");
+  }
+  sSet.onchange=fillAreas; sAr.onchange=fillTurnos;
+  fillAreas();
+  shadeEl.classList.add("open");
+}
+(function(){
+  const btn=document.getElementById("pkConfirm"); if(!btn) return;
+  btn.addEventListener("click", async ()=>{
+    const setor=document.getElementById("pkSetor").value;
+    const area=document.getElementById("pkArea").value;
+    const turno=document.getElementById("pkTurno").value;
+    const g=(state.groups||[]).find(x=>x.setor===setor && x.area===area && x.turno===turno);
+    const msg=document.getElementById("pkMsg");
+    if(!g){ if(msg){ msg.textContent="Grupo não encontrado. Rode o schema.sql atualizado."; msg.className="login-msg err"; } return; }
+    state.groupId=g.id; state.groupLabel=g.label; persist();
+    document.getElementById("groupPickShade").classList.remove("open");
+    await afterLogin();  // agora com grupo definido, segue o fluxo normal
+  });
+})();
+
 /* lista de perfis (nomes editáveis) */
 function renderProfilesList(){
   const box=document.getElementById("profilesList"); if(!box) return;
@@ -3003,7 +3075,8 @@ async function afterLogin(){
       : { kind:"system", text:m.texto, t:Date.parse(m.created_at)||Date.now() });
     persist(); renderMessages();
   }catch(e){}
-  if(!state.groupId && state.groups[0]){ state.groupId=state.groups[0].id; state.groupLabel=state.groups[0].label; persist(); }
+  // Primeiro login (sem grupo escolhido) -> abre a tela de escolha de grupo.
+  if(!state.groupId){ showGroupPicker(); return; }
   populateSelectors();
   renderProfilesList();
   renderGroupBar();
