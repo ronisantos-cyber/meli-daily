@@ -477,6 +477,15 @@
   .login-msg.err{color:#B91C1C}
   .login-msg.ok{color:#047857}
   .login-logo{width:56px;height:56px;border-radius:14px;margin-bottom:14px;background:#fff;padding:6px;box-shadow:0 3px 10px rgba(0,0,0,.12)}
+  /* Splash de abertura */
+  #splash{position:fixed;inset:0;z-index:300;background:var(--meli-yellow);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+    transition:opacity .45s ease}
+  #splash.hide{opacity:0;pointer-events:none}
+  .splash-circle{width:170px;height:170px;border-radius:50%;background:#fff;
+    box-shadow:0 12px 34px rgba(0,0,0,.16);display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .splash-circle img{width:76%;height:76%;object-fit:contain}
+  .splash-title{font-size:23px;font-weight:800;color:var(--ink);letter-spacing:.3px}
   /* Menu de títulos estilo iOS (balão translúcido) */
   .anot-shade{position:fixed;inset:0;z-index:180;background:rgba(0,0,0,.14);
     display:flex;align-items:flex-end;justify-content:center;
@@ -506,6 +515,12 @@
         onerror="window.__sbCdnFailed=true"></script>
 </head>
 <body>
+
+<!-- Splash de abertura: robô no círculo branco + "Meli Daily" -->
+<div id="splash">
+  <div class="splash-circle"><img id="splashImg" alt="Meli Daily"></div>
+  <div class="splash-title">Meli Daily</div>
+</div>
 
 <div class="device" id="device" style="position:relative">
 
@@ -3241,6 +3256,14 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
     }catch(e){}
     busy=false;
   });
+})();
+
+/* splash: usa o robô do header e some após ~1.3s */
+(function(){
+  const s=document.getElementById("splash"); if(!s) return;
+  const av=document.querySelector(".header .avatar img"), si=document.getElementById("splashImg");
+  if(av && si) si.src=av.src;
+  setTimeout(()=>{ s.classList.add("hide"); setTimeout(()=>{ if(s.parentNode) s.remove(); },500); }, 1300);
 })();
 
 /* BOOT */
