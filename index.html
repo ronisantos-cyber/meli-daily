@@ -507,6 +507,19 @@
     border-top:.5px solid rgba(0,0,0,.10)}
   .anot-pop-item:first-of-type{border-top:0}
   .anot-pop-item:active{background:rgba(0,0,0,.06)}
+  /* Acordeões da aba Listas */
+  .acc{border:1px solid var(--line);border-radius:12px;margin:0 4px 8px;overflow:hidden;background:#fff}
+  .acc-head{width:100%;display:flex;justify-content:space-between;align-items:center;background:#fff;border:0;padding:13px 14px;font:800 14px inherit;color:var(--ink);cursor:pointer}
+  .acc-caret{transition:transform .2s;color:var(--ink-2)}
+  .acc-head.open .acc-caret{transform:rotate(90deg)}
+  .acc-body{padding:8px 12px 12px;border-top:1px solid var(--line)}
+  .list-add-row{display:flex;gap:6px;margin:2px 0 10px}
+  .list-add-row input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit}
+  .list-add-row button{background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:700 13px inherit;cursor:pointer}
+  .list-row{display:flex;align-items:center;gap:8px;padding:8px 2px;border-top:1px solid var(--line)}
+  .list-row:first-of-type{border-top:0}
+  .list-row .lr-name{flex:1;min-width:0;word-break:break-word;font-size:14px}
+  .list-row .lr-btn{border:0;border-radius:8px;padding:5px 10px;font:700 12px inherit;cursor:pointer}
 </style>
 <!-- Supabase JS (grupos compartilhados). Carrega do CDN; se offline, o app
      cai no modo LOCAL sem quebrar (window.supabase fica undefined e é checado). -->
@@ -682,13 +695,19 @@
           <div id="feriasList"></div>
         </div>
 
-        <!-- Visão NOMES DA EQUIPE -->
+        <!-- Visão LISTAS (Nomes + Títulos de anotação) -->
         <div id="nomesView" style="display:none">
-          <div class="section-h">Nomes da equipe</div>
-          <div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 4px 8px">
-            Editar um nome troca em <b>todas</b> as folgas e feedbacks onde ele aparece. Apagar remove <b>todas</b> as ocorrências.
+          <div class="section-h">Listas</div>
+
+          <div class="acc">
+            <button class="acc-head" data-acc="accNomesBody"><span>Nomes da equipe</span><span class="acc-caret">▸</span></button>
+            <div class="acc-body" id="accNomesBody" style="display:none"></div>
           </div>
-          <div id="nomesList"></div>
+
+          <div class="acc">
+            <button class="acc-head" data-acc="accTitulosBody"><span>Títulos de anotação</span><span class="acc-caret">▸</span></button>
+            <div class="acc-body" id="accTitulosBody" style="display:none"></div>
+          </div>
         </div>
       </section>
 
@@ -1450,10 +1469,12 @@ function parseNoteBody(body){
   const colonMatch = body.match(NOTE_TITLE);
   if(colonMatch) return { title: colonMatch[1].trim(), text: colonMatch[2].trim() };
   // Caminho 2: sem ':' — primeira palavra é título, resto é conteúdo.
-  const tokens = body.split(/\s+/);
-  const head = tokens[0].replace(/[:\-]+$/,""); // tolera "AT:" sem conteúdo
-  if(tokens.length === 1) return { title: head, text: "" };
-  return { title: head, text: tokens.slice(1).join(" ").trim() };
+  // Usa substring (não split/join) pra PRESERVAR quebras de linha do conteúdo.
+  const m = body.match(/^(\S+)([\s\S]*)$/);
+  if(!m) return { title: body, text: "" };
+  const head = m[1].replace(/[:\-]+$/,""); // tolera "AT:" sem conteúdo
+  const text = m[2].replace(/^[ \t]*\n?/, "").replace(/^[ \t]+/, ""); // tira só o separador após o título
+  return { title: head, text: text };
 }
 
 function upsertNote(title, text){
@@ -2500,11 +2521,13 @@ const GROUP_TREE = {
     "SHIPPING": ["T1","T2","T3","T4","T5"]
   }
 };
+// Títulos pré-definidos de anotação (usados no menu long-press e no atalho de digitar)
+const NOTE_TITLES = ["AT","ABS","Setup_Time","Meal_Accuracy","NET","SLA"];
 
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[], titulos:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2600,6 +2623,11 @@ const SB = (function(){
       const fe = await client.from("ferias").select("*").eq("grupo_id",gid).order("inicio",{ascending:true});
       gState.ferias = (fe&&fe.data)?fe.data:[];
     }catch(e){ gState.ferias = gState.ferias||[]; }
+    // títulos de anotação editáveis (best-effort)
+    try{
+      const tl = await client.from("titulos").select("*").eq("grupo_id",gid).order("created_at",{ascending:true});
+      gState.titulos = (tl&&tl.data)?tl.data:[];
+    }catch(e){ gState.titulos = gState.titulos||[]; }
     // dicionário de nomes (best-effort; ignora se a tabela ainda não existe)
     try{
       const nn = await client.from("nomes").select("nome").eq("grupo_id",gid);
@@ -2622,6 +2650,7 @@ const SB = (function(){
         .on("postgres_changes",{event:"*",schema:"public",table:"feedbacks",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"nomes",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"ferias",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"titulos",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"perfis"}, onChange)
         .subscribe();
     }catch(e){}
@@ -2680,6 +2709,12 @@ const SB = (function(){
     const { error } = await client.rpc("delete_nome", { p_grupo:state.groupId, p_name:nome });
     if(error) throw error;
   }
+  async function addTitulo(t){ const { error } = await client.from("titulos").insert({ grupo_id:state.groupId, titulo:t }); if(error) throw error; }
+  async function updateTitulo(id, novo){ const { error } = await client.from("titulos").update({ titulo:novo }).eq("id",id); if(error) throw error; }
+  async function delTitulo(id){ const { error } = await client.from("titulos").delete().eq("id",id); if(error) throw error; }
+  async function seedTitulos(defaults){
+    for(const t of defaults){ try{ await client.from("titulos").insert({ grupo_id:state.groupId, titulo:t }); }catch(e){} }
+  }
 
   // Histórico de conversa (pessoal, por e-mail). Retenção 30 dias.
   async function addMensagem(texto, tipo){
@@ -2699,7 +2734,8 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome, del, addMensagem, loadMensagens };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
+    addTitulo, updateTitulo, delTitulo, seedTitulos, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
@@ -2769,7 +2805,7 @@ function renderGroupNotes(){
       const entries=byTitle[title];
       const lines=entries.map(n=>{
         const del = isMine(n.author_email) ? `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>` : "";
-        return `<li style="margin:3px 0">${escapeHtml(n.conteudo||"")} — ${authChip(n.author_email)}${del}</li>`;
+        return `<li style="margin:3px 0"><span style="white-space:pre-wrap;word-break:break-word">${escapeHtml(n.conteudo||"")}</span> — ${authChip(n.author_email)}${del}</li>`;
       }).join("");
       html += `<div class="item"><div class="check" style="visibility:hidden"></div>
         <div class="item-body" style="min-width:0">
@@ -2982,6 +3018,21 @@ function onRealtime(){ clearTimeout(_rtTimer); _rtTimer=setTimeout(()=>{ SB.load
 
 /* ---------- comandos de chat no grupo ---------- */
 function handleGroupCommand(trimmed){
+  // Atalho: se a 1ª palavra for exatamente um título pré-definido (sem case),
+  // vira anotação sem precisar do "Anotar" na frente.
+  const fw=trimmed.match(/^(\S+)([\s\S]*)$/);
+  if(fw){
+    const cano=currentTitles().find(t=>t.toLowerCase()===fw[1].toLowerCase());
+    if(cano){
+      const texto=fw[2].replace(/^[ \t]*\n?/,"").replace(/^[ \t]+/,"");
+      const titulo=cano.toUpperCase(), dia=todayKey();
+      if(!texto){ sysChat(`Qual o conteúdo da anotação "${titulo}"?`); return true; }
+      SB.addNote(dia, currentSubcatDefault(), titulo, texto).then(refreshGroupAndRender)
+        .then(()=>sysChat(`Anotação "${titulo}" adicionada (${formatPretty(dia)}).`))
+        .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
+      return true;
+    }
+  }
   const noteMatch=trimmed.match(NOTE_TRIGGER);
   if(noteMatch){
     const parsed=parseNoteBody(noteMatch[1]);
@@ -3301,7 +3352,6 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
 /* long-press no botão "Anotação" -> menu de títulos */
 (function(){
   const btn=document.getElementById("btnAnotacao"); if(!btn) return;
-  const TITLES=["AT","ABS","Setup_Time","Meal_Accuracy","NET","SLA"];
   let timer=null, longFired=false;
   function close(){ const s=document.getElementById("anotMenuShade"); if(s) s.remove(); }
   function pick(t){
@@ -3319,7 +3369,7 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
     const pop=document.createElement("div"); pop.className="anot-pop";
     const title=document.createElement("div"); title.className="anot-pop-title"; title.textContent="Título da anotação";
     pop.appendChild(title);
-    TITLES.forEach(t=>{
+    currentTitles().forEach(t=>{
       const it=document.createElement("button");
       it.className="anot-pop-item"; it.textContent=t;
       it.addEventListener("click",()=>pick(t));
@@ -3371,8 +3421,8 @@ function applyThirdView(){
   if(fbk) fbk.style.display = (v==="feedback")?"":"none";
   if(nm)  nm.style.display  = (v==="nomes")?"":"none";
   if(fer) fer.style.display = (v==="ferias")?"":"none";
-  if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Nomes":(v==="ferias"?"Férias":"Folgas"));
-  try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderNomes(); else if(v==="ferias") renderFerias(); else renderFolgasView(); }catch(e){}
+  if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Listas":(v==="ferias"?"Férias":"Folgas"));
+  try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderListas(); else if(v==="ferias") renderFerias(); else renderFolgasView(); }catch(e){}
 }
 function openThirdChooser(){
   if(document.getElementById("thirdChooser")) return;
@@ -3380,7 +3430,7 @@ function openThirdChooser(){
   shadeEl.style.alignItems="flex-start"; shadeEl.style.padding="90px 14px 0";
   const pop=document.createElement("div"); pop.className="anot-pop"; pop.style.maxWidth="240px";
   pop.innerHTML='<div class="anot-pop-title">Terceira aba</div>';
-  [["folgas","Folgas"],["ferias","Férias"],["feedback","Feedback"],["nomes","Nomes da equipe"]].forEach(function(o){
+  [["folgas","Folgas"],["ferias","Férias"],["feedback","Feedback"],["nomes","Listas"]].forEach(function(o){
     const it=document.createElement("button"); it.className="anot-pop-item"; it.textContent=o[1];
     it.addEventListener("click",()=>{ state.thirdView=o[0]; persist(); shadeEl.remove(); applyThirdView(); });
     pop.appendChild(it);
@@ -3400,72 +3450,112 @@ function allKnownNames(){
   return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b));
 }
 
-/* render Nomes da Equipe (editar/apagar com confirmação) */
-function renderNomes(){
-  const box=document.getElementById("nomesList"); if(!box) return;
+/* ---- Listas: Nomes + Títulos de anotação (acordeões) ---- */
+function currentTitles(){
+  const t=(SB.gState.titulos||[]).map(x=>x.titulo).filter(Boolean);
+  return t.length ? t : NOTE_TITLES.slice();
+}
+let _seedingTitulos=false;
+function renderListas(){
+  const nb=document.getElementById("accNomesBody");
+  const tb=document.getElementById("accTitulosBody");
+  if(nb) renderNomesList(nb);
+  if(tb) renderTitulosList(tb);
+}
+function renderNomesList(box){
   const names=allKnownNames();
-  if(!names.length){ box.innerHTML=`<div class="empty">Nenhum nome ainda. Eles entram ao adicionar folgas ou feedbacks.</div>`; return; }
-  box.innerHTML=names.map(n=>`
-    <div class="item" data-nome="${escapeHtml(n)}">
-      <div class="check" style="visibility:hidden"></div>
-      <div class="item-body" style="min-width:0">
-        <div class="item-title nome-txt" style="word-break:break-word">${escapeHtml(n)}</div>
-        <div class="item-meta" style="gap:8px;margin-top:6px">
-          <button class="nm-edit" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:5px 12px;font:700 12px inherit">Editar</button>
-          <button class="nm-del" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:5px 12px;font:700 12px inherit">Apagar</button>
-        </div>
-      </div>
-    </div>`).join("");
-  box.querySelectorAll(".item[data-nome]").forEach(el=>{
-    const nome=el.dataset.nome;
-    el.querySelector(".nm-edit").addEventListener("click",()=>startEditNome(el, nome));
-    el.querySelector(".nm-del").addEventListener("click",()=>confirmDeleteNome(el, nome));
+  let html='<div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 0 8px">Editar renomeia em <b>todas</b> as folgas e feedbacks. Apagar remove <b>todas</b> as ocorrências.</div>';
+  html+='<div class="list-add-row"><input type="text" id="addNomeInp" placeholder="Novo nome"><button id="addNomeBtn">Adicionar</button></div>';
+  html+= names.length ? names.map(n=>`
+    <div class="list-row" data-nome="${escapeHtml(n)}">
+      <span class="lr-name">${escapeHtml(n)}</span>
+      <button class="lr-btn nm-edit" style="background:var(--meli-blue);color:#fff">Editar</button>
+      <button class="lr-btn nm-del" style="background:#EF4444;color:#fff">Apagar</button>
+    </div>`).join("") : '<div class="empty">Nenhum nome ainda.</div>';
+  box.innerHTML=html;
+  const inp=box.querySelector("#addNomeInp"), addb=box.querySelector("#addNomeBtn");
+  if(addb) addb.addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v) return;
+    SB.addNome(v).then(()=>refreshGroupAndRender()).then(renderListas).then(()=>sysChat(`Nome "${v}" adicionado.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  box.querySelectorAll(".list-row[data-nome]").forEach(row=>{
+    const nome=row.dataset.nome;
+    row.querySelector(".nm-edit").addEventListener("click",()=>editNomeInline(row,nome));
+    row.querySelector(".nm-del").addEventListener("click",()=>delNomeInline(row,nome));
   });
 }
-function startEditNome(el, nome){
-  const body=el.querySelector(".item-body");
-  if(body.querySelector(".nm-editbox")) return;
-  const box=document.createElement("div");
-  box.className="nm-editbox"; box.style.cssText="margin-top:8px;display:flex;flex-direction:column;gap:6px";
-  box.innerHTML=`
-    <input type="text" class="nm-inp" value="${escapeHtml(nome)}" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
-    <div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px">
-      Isso vai renomear <b>${escapeHtml(nome)}</b> em todas as folgas e feedbacks.
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="nm-confirm" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar</button>
-      <button class="nm-cancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button>
-    </div>`;
-  body.appendChild(box);
-  const inp=box.querySelector(".nm-inp"); inp.focus();
-  box.querySelector(".nm-cancel").addEventListener("click",()=>box.remove());
-  box.querySelector(".nm-confirm").addEventListener("click",()=>{
-    const novo=(inp.value||"").trim();
-    if(!novo || novo.toLowerCase()===nome.toLowerCase()){ box.remove(); return; }
-    SB.renameNome(nome, novo).then(refreshGroupAndRender).then(()=>{ renderNomes(); sysChat(`Nome "${nome}" renomeado para "${novo}".`); })
-      .catch(e=>sysChat("Erro ao renomear: "+sbErrMsg(e)));
+function editNomeInline(row, nome){
+  if(row.parentNode.querySelector(".nm-editbox")) return;
+  const box=document.createElement("div"); box.className="nm-editbox"; box.style.cssText="display:flex;flex-direction:column;gap:6px;padding:4px 2px 10px";
+  box.innerHTML=`<input type="text" class="e-inp" value="${escapeHtml(nome)}" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
+    <div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px">Renomeia <b>${escapeHtml(nome)}</b> em todas as folgas e feedbacks.</div>
+    <div style="display:flex;gap:8px"><button class="e-ok" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar</button><button class="e-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
+  row.after(box); const inp=box.querySelector(".e-inp"); inp.focus();
+  box.querySelector(".e-no").addEventListener("click",()=>box.remove());
+  box.querySelector(".e-ok").addEventListener("click",()=>{ const novo=(inp.value||"").trim();
+    if(!novo||novo.toLowerCase()===nome.toLowerCase()){ box.remove(); return; }
+    SB.renameNome(nome,novo).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" renomeado para "${novo}".`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+}
+function delNomeInline(row, nome){
+  if(row.parentNode.querySelector(".nm-delbox")) return;
+  const box=document.createElement("div"); box.className="nm-delbox"; box.style.cssText="display:flex;flex-direction:column;gap:6px;padding:4px 2px 10px";
+  box.innerHTML=`<div style="font-size:12px;color:#991B1B;background:#FEE2E2;border:1px solid #F87171;border-radius:8px;padding:6px 8px">Apagar <b>${escapeHtml(nome)}</b> remove de <b>todas</b> as folgas e apaga <b>todos</b> os feedbacks sobre ela. Sem desfazer.</div>
+    <div style="display:flex;gap:8px"><button class="d-ok" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar exclusão</button><button class="d-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
+  row.after(box);
+  box.querySelector(".d-no").addEventListener("click",()=>box.remove());
+  box.querySelector(".d-ok").addEventListener("click",()=>{
+    SB.deleteNome(nome).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" e ocorrências apagados.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+}
+function renderTitulosList(box){
+  // auto-seed dos títulos padrão na 1ª vez (torna-os editáveis)
+  if((SB.gState.titulos||[]).length===0 && !_seedingTitulos){
+    _seedingTitulos=true;
+    box.innerHTML='<div class="empty">Preparando títulos...</div>';
+    SB.seedTitulos(NOTE_TITLES).then(()=>refreshGroupAndRender()).then(()=>{ _seedingTitulos=false; renderListas(); }).catch(()=>{ _seedingTitulos=false; });
+    return;
+  }
+  const rows=(SB.gState.titulos||[]).slice();
+  let html='<div class="list-add-row"><input type="text" id="addTitInp" placeholder="Novo título"><button id="addTitBtn">Adicionar</button></div>';
+  html+= rows.length ? rows.map(r=>`
+    <div class="list-row" data-id="${r.id}" data-tit="${escapeHtml(r.titulo)}">
+      <span class="lr-name">${escapeHtml(r.titulo)}</span>
+      <button class="lr-btn tt-edit" style="background:var(--meli-blue);color:#fff">Editar</button>
+      <button class="lr-btn tt-del" style="background:#EF4444;color:#fff">Apagar</button>
+    </div>`).join("") : '<div class="empty">Sem títulos.</div>';
+  box.innerHTML=html;
+  const inp=box.querySelector("#addTitInp"), addb=box.querySelector("#addTitBtn");
+  if(addb) addb.addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v) return;
+    SB.addTitulo(v).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Título "${v}" adicionado.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  box.querySelectorAll(".list-row[data-id]").forEach(row=>{
+    const id=row.dataset.id, tit=row.dataset.tit;
+    row.querySelector(".tt-edit").addEventListener("click",()=>editTituloInline(row,id,tit));
+    row.querySelector(".tt-del").addEventListener("click",()=>{
+      if(row.parentNode.querySelector(".tt-delbox")) return;
+      const b=document.createElement("div"); b.className="tt-delbox"; b.style.cssText="display:flex;gap:8px;padding:4px 2px 10px";
+      b.innerHTML=`<button class="x-ok" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar exclusão</button><button class="x-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button>`;
+      row.after(b);
+      b.querySelector(".x-no").addEventListener("click",()=>b.remove());
+      b.querySelector(".x-ok").addEventListener("click",()=>{ SB.delTitulo(id).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Título "${tit}" apagado.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+    });
   });
 }
-function confirmDeleteNome(el, nome){
-  const body=el.querySelector(".item-body");
-  if(body.querySelector(".nm-delbox")) return;
-  const box=document.createElement("div");
-  box.className="nm-delbox"; box.style.cssText="margin-top:8px;display:flex;flex-direction:column;gap:6px";
-  box.innerHTML=`
-    <div style="font-size:12px;color:#991B1B;background:#FEE2E2;border:1px solid #F87171;border-radius:8px;padding:6px 8px">
-      Apagar <b>${escapeHtml(nome)}</b> remove esse nome de <b>todas</b> as folgas e apaga <b>todos</b> os feedbacks sobre ela. Não dá pra desfazer.
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="nm-confirmdel" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar exclusão</button>
-      <button class="nm-cancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button>
-    </div>`;
-  body.appendChild(box);
-  box.querySelector(".nm-cancel").addEventListener("click",()=>box.remove());
-  box.querySelector(".nm-confirmdel").addEventListener("click",()=>{
-    SB.deleteNome(nome).then(refreshGroupAndRender).then(()=>{ renderNomes(); sysChat(`Nome "${nome}" e todas as ocorrências apagados.`); })
-      .catch(e=>sysChat("Erro ao apagar: "+sbErrMsg(e)));
-  });
+function editTituloInline(row, id, tit){
+  if(row.parentNode.querySelector(".tt-editbox")) return;
+  const box=document.createElement("div"); box.className="tt-editbox"; box.style.cssText="display:flex;gap:6px;padding:4px 2px 10px";
+  box.innerHTML=`<input type="text" class="t-inp" value="${escapeHtml(tit)}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"><button class="t-ok" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Salvar</button>`;
+  row.after(box); const inp=box.querySelector(".t-inp"); inp.focus();
+  box.querySelector(".t-ok").addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v){ box.remove(); return; }
+    SB.updateTitulo(id,v).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Título atualizado para "${v}".`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
 }
+/* acordeão: expande/recolhe (delegação) */
+document.addEventListener("click", function(e){
+  const head=e.target.closest && e.target.closest(".acc-head");
+  if(!head) return;
+  const bodyId=head.dataset.acc; const body=document.getElementById(bodyId);
+  if(!body) return;
+  const open = body.style.display==="none";
+  body.style.display = open?"":"none";
+  head.classList.toggle("open", open);
+});
+
 (function(){
   const t3=document.getElementById("tab3");
   if(t3) t3.addEventListener("click",(e)=>{ if(active===2){ e.stopImmediatePropagation(); openThirdChooser(); } }, true);
@@ -3509,7 +3599,7 @@ function renderFeedback(){
     const dt=f.created_at?formatPretty(String(f.created_at).slice(0,10)):"";
     return `<div class="item"><div class="check" style="visibility:hidden"></div>
       <div class="item-body" style="min-width:0">
-        <div style="word-break:break-word">${escapeHtml(f.texto||"")}${del}</div>
+        <div style="white-space:pre-wrap;word-break:break-word">${escapeHtml(f.texto||"")}${del}</div>
         <div class="item-meta" style="margin-top:4px"><span>${escapeHtml(dt)}</span> · ${authChip(f.author_email)}</div>
       </div></div>`;
   }).join("");
