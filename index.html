@@ -657,6 +657,15 @@
           <div class="section-h">Feedbacks de <span id="fbPersonLabel">—</span></div>
           <div id="feedbackList"></div>
         </div>
+
+        <!-- Visão NOMES DA EQUIPE -->
+        <div id="nomesView" style="display:none">
+          <div class="section-h">Nomes da equipe</div>
+          <div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 4px 8px">
+            Editar um nome troca em <b>todas</b> as folgas e feedbacks onde ele aparece. Apagar remove <b>todas</b> as ocorrências.
+          </div>
+          <div id="nomesList"></div>
+        </div>
       </section>
 
     </div>
@@ -2627,6 +2636,14 @@ const SB = (function(){
     addNome(pessoa); // registra o nome no dicionário
   }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
+  async function renameNome(oldN, newN){
+    const { error } = await client.rpc("rename_nome", { p_grupo:state.groupId, p_old:oldN, p_new:newN });
+    if(error) throw error;
+  }
+  async function deleteNome(nome){
+    const { error } = await client.rpc("delete_nome", { p_grupo:state.groupId, p_name:nome });
+    if(error) throw error;
+  }
 
   // Histórico de conversa (pessoal, por e-mail). Retenção 30 dias.
   async function addMensagem(texto, tipo){
@@ -2646,7 +2663,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addNome, del, addMensagem, loadMensagens };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addNome, renameNome, deleteNome, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
@@ -3295,14 +3312,15 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
 
 /* ================= 3ª aba: Folgas <-> Feedback ================= */
 function applyThirdView(){
-  try{ refreshNameBase(); }catch(e){}   // popula sugestões nas duas visões
-  const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView");
+  try{ refreshNameBase(); }catch(e){}   // popula sugestões nas visões
+  const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView"), nm=document.getElementById("nomesView");
   const lbl=document.getElementById("tab3Label");
-  const isFb = state.thirdView==="feedback";
-  if(fol) fol.style.display = isFb?"none":"";
-  if(fbk) fbk.style.display = isFb?"":"none";
-  if(lbl) lbl.textContent = isFb?"Feedback":"Folgas";
-  try{ if(isFb) renderFeedback(); else renderFolgasView(); }catch(e){}
+  const v = state.thirdView;
+  if(fol) fol.style.display = (v==="folgas")?"":"none";
+  if(fbk) fbk.style.display = (v==="feedback")?"":"none";
+  if(nm)  nm.style.display  = (v==="nomes")?"":"none";
+  if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Nomes":"Folgas");
+  try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderNomes(); else renderFolgasView(); }catch(e){}
 }
 function openThirdChooser(){
   if(document.getElementById("thirdChooser")) return;
@@ -3310,7 +3328,7 @@ function openThirdChooser(){
   shadeEl.style.alignItems="flex-start"; shadeEl.style.padding="90px 14px 0";
   const pop=document.createElement("div"); pop.className="anot-pop"; pop.style.maxWidth="240px";
   pop.innerHTML='<div class="anot-pop-title">Terceira aba</div>';
-  [["folgas","Folgas"],["feedback","Feedback"]].forEach(function(o){
+  [["folgas","Folgas"],["feedback","Feedback"],["nomes","Nomes da equipe"]].forEach(function(o){
     const it=document.createElement("button"); it.className="anot-pop-item"; it.textContent=o[1];
     it.addEventListener("click",()=>{ state.thirdView=o[0]; persist(); shadeEl.remove(); applyThirdView(); });
     pop.appendChild(it);
@@ -3318,6 +3336,83 @@ function openThirdChooser(){
   shadeEl.appendChild(pop);
   shadeEl.addEventListener("click",e=>{ if(e.target===shadeEl) shadeEl.remove(); });
   document.body.appendChild(shadeEl);
+}
+
+/* lista de todos os nomes conhecidos (dicionário + folgas + feedbacks) */
+function allKnownNames(){
+  const set=new Set();
+  const addAll=arr=>arr.forEach(n=>{ if(n && String(n).trim()) set.add(String(n).trim()); });
+  addAll(SB.gState.nomes||[]);
+  (SB.gState.folgas||[]).forEach(f=> addAll(nomesToArray(f.nomes)) );
+  (SB.gState.feedbacks||[]).forEach(fb=>{ if(fb.pessoa) set.add(String(fb.pessoa).trim()); });
+  return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b));
+}
+
+/* render Nomes da Equipe (editar/apagar com confirmação) */
+function renderNomes(){
+  const box=document.getElementById("nomesList"); if(!box) return;
+  const names=allKnownNames();
+  if(!names.length){ box.innerHTML=`<div class="empty">Nenhum nome ainda. Eles entram ao adicionar folgas ou feedbacks.</div>`; return; }
+  box.innerHTML=names.map(n=>`
+    <div class="item" data-nome="${escapeHtml(n)}">
+      <div class="check" style="visibility:hidden"></div>
+      <div class="item-body" style="min-width:0">
+        <div class="item-title nome-txt" style="word-break:break-word">${escapeHtml(n)}</div>
+        <div class="item-meta" style="gap:8px;margin-top:6px">
+          <button class="nm-edit" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:5px 12px;font:700 12px inherit">Editar</button>
+          <button class="nm-del" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:5px 12px;font:700 12px inherit">Apagar</button>
+        </div>
+      </div>
+    </div>`).join("");
+  box.querySelectorAll(".item[data-nome]").forEach(el=>{
+    const nome=el.dataset.nome;
+    el.querySelector(".nm-edit").addEventListener("click",()=>startEditNome(el, nome));
+    el.querySelector(".nm-del").addEventListener("click",()=>confirmDeleteNome(el, nome));
+  });
+}
+function startEditNome(el, nome){
+  const body=el.querySelector(".item-body");
+  if(body.querySelector(".nm-editbox")) return;
+  const box=document.createElement("div");
+  box.className="nm-editbox"; box.style.cssText="margin-top:8px;display:flex;flex-direction:column;gap:6px";
+  box.innerHTML=`
+    <input type="text" class="nm-inp" value="${escapeHtml(nome)}" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
+    <div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px">
+      Isso vai renomear <b>${escapeHtml(nome)}</b> em todas as folgas e feedbacks.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="nm-confirm" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar</button>
+      <button class="nm-cancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button>
+    </div>`;
+  body.appendChild(box);
+  const inp=box.querySelector(".nm-inp"); inp.focus();
+  box.querySelector(".nm-cancel").addEventListener("click",()=>box.remove());
+  box.querySelector(".nm-confirm").addEventListener("click",()=>{
+    const novo=(inp.value||"").trim();
+    if(!novo || novo.toLowerCase()===nome.toLowerCase()){ box.remove(); return; }
+    SB.renameNome(nome, novo).then(refreshGroupAndRender).then(()=>{ renderNomes(); sysChat(`Nome "${nome}" renomeado para "${novo}".`); })
+      .catch(e=>sysChat("Erro ao renomear: "+sbErrMsg(e)));
+  });
+}
+function confirmDeleteNome(el, nome){
+  const body=el.querySelector(".item-body");
+  if(body.querySelector(".nm-delbox")) return;
+  const box=document.createElement("div");
+  box.className="nm-delbox"; box.style.cssText="margin-top:8px;display:flex;flex-direction:column;gap:6px";
+  box.innerHTML=`
+    <div style="font-size:12px;color:#991B1B;background:#FEE2E2;border:1px solid #F87171;border-radius:8px;padding:6px 8px">
+      Apagar <b>${escapeHtml(nome)}</b> remove esse nome de <b>todas</b> as folgas e apaga <b>todos</b> os feedbacks sobre ela. Não dá pra desfazer.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="nm-confirmdel" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar exclusão</button>
+      <button class="nm-cancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button>
+    </div>`;
+  body.appendChild(box);
+  box.querySelector(".nm-cancel").addEventListener("click",()=>box.remove());
+  box.querySelector(".nm-confirmdel").addEventListener("click",()=>{
+    SB.deleteNome(nome).then(refreshGroupAndRender).then(()=>{ renderNomes(); sysChat(`Nome "${nome}" e todas as ocorrências apagados.`); })
+      .catch(e=>sysChat("Erro ao apagar: "+sbErrMsg(e)));
+  });
 }
 (function(){
   const t3=document.getElementById("tab3");
@@ -3388,7 +3483,7 @@ function renderFeedback(){
     if(!pessoa){ sysChat("Feedback: digite o nome da pessoa."); return; }
     if(!texto){ sysChat("Feedback: escreva o texto."); return; }
     SB.addFeedback(pessoa, texto).then(refreshGroupAndRender)
-      .then(()=>{ if(txtEl) txtEl.value=""; renderFeedback(); sysChat(`Feedback sobre ${pessoa} adicionado.`); })
+      .then(()=>{ if(txtEl) txtEl.value=""; if(nameEl) nameEl.value=""; renderFeedback(); if(nameEl) nameEl.focus(); sysChat(`Feedback sobre ${pessoa} adicionado.`); })
       .catch(e=>sysChat("Erro ao salvar feedback: "+sbErrMsg(e)));
   });
 })();
