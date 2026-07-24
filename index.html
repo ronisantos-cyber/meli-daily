@@ -2821,7 +2821,7 @@ function handleGroupCommand(trimmed){
     const parsed=parseNoteBody(noteMatch[1]);
     if(!parsed){ sysChat(`Pra anotar, manda "Anotar TÍTULO: conteúdo".`); return true; }
     if(!parsed.text){ sysChat(`Qual o conteúdo da anotação "${parsed.title.toUpperCase()}"?`); return true; }
-    const dia=selDay(), titulo=parsed.title.toUpperCase(), sub=currentSubcatDefault();
+    const dia=todayKey(), titulo=parsed.title.toUpperCase(), sub=currentSubcatDefault();
     SB.addNote(dia, sub, titulo, parsed.text).then(refreshGroupAndRender)
       .then(()=>sysChat(`Anotação "${titulo}" adicionada (${formatPretty(dia)}).`))
       .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
@@ -2829,7 +2829,7 @@ function handleGroupCommand(trimmed){
   }
   const tm=trimmed.match(TASK_TRIGGER);
   if(tm && tm[1] && tm[1].trim()){
-    const rest=tm[1].trim(), dia=selDay();
+    const rest=tm[1].trim(), dia=todayKey();
     SB.addTask(dia, rest).then(refreshGroupAndRender)
       .then(()=>sysChat(`Tarefa "${rest}" criada (${formatPretty(dia)}).`))
       .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
@@ -2846,9 +2846,9 @@ function handleGroupCommand(trimmed){
       .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
     return true;
   }
-  // resumo do dia (grupo)
+  // resumo do dia (grupo) — sempre o dia atual
   if(/^(resumo|resume|resumo do dia|resumo dia)\b/i.test(trimmed)){
-    sysChat(buildGroupSummaryText(selDay()));
+    sysChat(buildGroupSummaryText(todayKey()));
     return true;
   }
   return false;
