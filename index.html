@@ -516,12 +516,6 @@
 </head>
 <body>
 
-<!-- Splash de abertura: robô no círculo branco + "Meli Daily" -->
-<div id="splash">
-  <div class="splash-circle"><img id="splashImg" alt="Meli Daily"></div>
-  <div class="splash-title">Meli Daily</div>
-</div>
-
 <div class="device" id="device" style="position:relative">
 
   <!-- Login overlay (código OTP por e-mail MELI). Só aparece quando o
@@ -3256,14 +3250,6 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
     }catch(e){}
     busy=false;
   });
-})();
-
-/* splash: usa o robô do header e some após ~1.3s */
-(function(){
-  const s=document.getElementById("splash"); if(!s) return;
-  const av=document.querySelector(".header .avatar img"), si=document.getElementById("splashImg");
-  if(av && si) si.src=av.src;
-  setTimeout(()=>{ s.classList.add("hide"); setTimeout(()=>{ if(s.parentNode) s.remove(); },500); }, 1300);
 })();
 
 /* BOOT */
