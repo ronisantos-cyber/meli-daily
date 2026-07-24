@@ -2471,7 +2471,7 @@ const GROUP_TREE = {
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2562,6 +2562,16 @@ const SB = (function(){
     gState.tarefas   = (t&&t.data)?t.data:[];
     gState.folgas    = (f&&f.data)?f.data:[];
     gState.feedbacks = (fb&&fb.data)?fb.data:[];
+    // dicionário de nomes (best-effort; ignora se a tabela ainda não existe)
+    try{
+      const nn = await client.from("nomes").select("nome").eq("grupo_id",gid);
+      gState.nomes = (nn&&nn.data)?nn.data.map(r=>r.nome):[];
+    }catch(e){ gState.nomes = gState.nomes||[]; }
+  }
+  // registra um nome no dicionário do grupo (acumula; ignora duplicado/erro)
+  async function addNome(nome){
+    if(!client || !nome || !String(nome).trim()) return;
+    try{ await client.from("nomes").insert({ grupo_id:state.groupId, nome:String(nome).trim() }); }catch(e){}
   }
   function subscribe(gid, onChange){
     if(!client || !gid) return;
@@ -2572,6 +2582,7 @@ const SB = (function(){
         .on("postgres_changes",{event:"*",schema:"public",table:"tarefas",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"folgas",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"feedbacks",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"nomes",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"perfis"}, onChange)
         .subscribe();
     }catch(e){}
@@ -2601,6 +2612,8 @@ const SB = (function(){
       res = await client.from("folgas").insert(row);
     }
     if(res.error) throw res.error;
+    // registra os nomes no dicionário (acumula)
+    (Array.isArray(nomes)?nomes:[]).forEach(n=>{ addNome(n); });
   }
   async function setFolgaStatus(id, status){
     const m=me();
@@ -2611,6 +2624,7 @@ const SB = (function(){
     const m=me();
     const { error } = await client.from("feedbacks").insert({ grupo_id:state.groupId, pessoa, texto, author_email:m.email, author_nome:m.nome });
     if(error) throw error;
+    addNome(pessoa); // registra o nome no dicionário
   }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
 
@@ -2632,7 +2646,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, del, addMensagem, loadMensagens };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addNome, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
@@ -3323,6 +3337,7 @@ function refreshNameBase(){
   const dl=document.getElementById("nameBase"); if(!dl) return;
   const set=new Set();
   const addAll=arr=>arr.forEach(n=>{ if(n && String(n).trim()) set.add(String(n).trim()); });
+  addAll(SB.gState.nomes||[]);   // dicionário persistente (acumula)
   (SB.gState.folgas||[]).forEach(f=> addAll(nomesToArray(f.nomes)) );
   (SB.gState.feedbacks||[]).forEach(fb=>{ if(fb.pessoa && String(fb.pessoa).trim()) set.add(String(fb.pessoa).trim()); });
   // fallback: folgas locais (modo sem grupo)
