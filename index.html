@@ -638,7 +638,7 @@
           <div class="folgas-add">
             <div class="folgas-add-row">
               <input type="date" id="folgaDateInput">
-              <input type="text" id="folgaNamesInput" list="nameBase" placeholder="Nomes (separe com vírgula)" autocomplete="off" autocapitalize="words">
+              <input type="text" id="folgaNamesInput" list="nameBase" placeholder="Nomes (separe com vírgula)" autocapitalize="words">
             </div>
             <input type="text" id="folgaMotivoInput" placeholder="Motivo (opcional)" autocomplete="off" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit;margin-top:6px">
             <button class="folgas-add-btn" id="folgaAddBtn">+ Adicionar folga</button>
@@ -650,7 +650,7 @@
         <!-- Visão FEEDBACK -->
         <div id="feedbackView" style="display:none">
           <div class="folgas-add">
-            <input type="text" id="fbNameInput" list="nameBase" placeholder="Nome da pessoa" autocomplete="off" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit">
+            <input type="text" id="fbNameInput" list="nameBase" placeholder="Nome da pessoa" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit">
             <textarea id="fbTextInput" rows="2" placeholder="Feedback / anotação sobre a pessoa" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit;margin-top:6px;resize:none"></textarea>
             <button class="folgas-add-btn" id="fbAddBtn">+ Adicionar feedback</button>
           </div>
@@ -3311,11 +3311,22 @@ function openThirdChooser(){
 })();
 
 /* base de nomes compartilhada (folgas + feedback) p/ autocompletar */
+function nomesToArray(v){
+  // nomes pode vir como array (normal) ou string "{a,b}" dependendo do driver
+  if(Array.isArray(v)) return v;
+  if(typeof v==="string"){
+    return v.replace(/^\{|\}$/g,"").split(",").map(s=>s.replace(/^"|"$/g,""));
+  }
+  return [];
+}
 function refreshNameBase(){
   const dl=document.getElementById("nameBase"); if(!dl) return;
   const set=new Set();
-  (SB.gState.folgas||[]).forEach(f=> (Array.isArray(f.nomes)?f.nomes:[]).forEach(n=>{ if(n && n.trim()) set.add(n.trim()); }));
-  (SB.gState.feedbacks||[]).forEach(fb=>{ if(fb.pessoa && fb.pessoa.trim()) set.add(fb.pessoa.trim()); });
+  const addAll=arr=>arr.forEach(n=>{ if(n && String(n).trim()) set.add(String(n).trim()); });
+  (SB.gState.folgas||[]).forEach(f=> addAll(nomesToArray(f.nomes)) );
+  (SB.gState.feedbacks||[]).forEach(fb=>{ if(fb.pessoa && String(fb.pessoa).trim()) set.add(String(fb.pessoa).trim()); });
+  // fallback: folgas locais (modo sem grupo)
+  (state.folgas||[]).forEach(f=> addAll(nomesToArray(f.names)) );
   const names=[...set].sort((a,b)=>a.localeCompare(b));
   dl.innerHTML=names.map(n=>`<option value="${escapeHtml(n)}"></option>`).join("");
 }
