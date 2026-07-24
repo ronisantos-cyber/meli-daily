@@ -655,6 +655,35 @@ O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</
         <span class="pill" id="sbBadge">local</span>
       </div>
 
+      <!-- Grupo (setor/área/turno) + nomes — só aparece logado -->
+      <div id="sbGroupBox" style="display:none">
+        <h3>Grupo — Setor / Área / Turno</h3>
+        <div class="edit-fields" style="padding:6px 0 4px">
+          <label>Setor</label>
+          <select id="selSetor" class="group-select"></select>
+          <label>Área</label>
+          <select id="selArea" class="group-select"></select>
+          <label>Turno</label>
+          <select id="selTurno" class="group-select"></select>
+        </div>
+        <div class="row-set">
+          <div><div class="label">Grupo atual</div><div class="desc" id="curGroupLabel">—</div></div>
+        </div>
+
+        <h3>Nomes da equipe</h3>
+        <div class="info" style="background:#DBEAFE;border-color:#93C5FD;color:#1E3A8A">
+          O nome aparece nas anotações e folgas. Editar aqui atualiza em todo lugar. Toque num nome no app pra ver o e-mail.
+        </div>
+        <div class="edit-fields" style="padding:6px 0 4px">
+          <label>Seu nome</label>
+          <input type="text" id="myNameInput" placeholder="Seu nome" autocomplete="off" autocapitalize="words">
+        </div>
+        <div style="display:flex;gap:8px;margin:8px 0 4px">
+          <button class="conn-btn connect" id="myNameSave">Salvar meu nome</button>
+        </div>
+        <div id="profilesList" style="margin-top:6px"></div>
+      </div>
+
       <h3>IA direta (modo dev)</h3>
       <div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F">
         <strong>⚠️ Apenas pra testes locais.</strong> A API key fica em <code>localStorage</code> sem Keystore. Use só se o BFF não estiver disponível. Se o BFF estiver configurado e logado, o chat usa o BFF e ignora estas chaves.
@@ -2322,13 +2351,24 @@ document.getElementById("wipeBtn").addEventListener("click", (ev)=>{
 });
 
 /* ============================================================================
-   GRUPOS COMPARTILHADOS (Supabase) — v0.2.0
+   GRUPOS COMPARTILHADOS (Supabase) — v0.3.0
    Camada aditiva. Sem config, tudo abaixo fica inerte e o app roda LOCAL.
    ========================================================================== */
+
+// Árvore SETOR > ÁREA > TURNO (combinações válidas)
+const GROUP_TREE = {
+  "INBOUND":  { "PUTAWAY": ["T4","T5"] },
+  "OUTBOUND": {
+    "PICKING":  ["T1","T2","T3","T4","T5"],
+    "PACKING":  ["T1","T2","T3","T4","T5"],
+    "SHIPPING": ["T1","T2","T3","T4","T5"]
+  }
+};
+
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], folgas:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2342,8 +2382,7 @@ const SB = (function(){
     if(!window.supabase || !window.supabase.createClient) return false;
     try{
       client = window.supabase.createClient(state.sb.url, state.sb.anonKey, {
-        auth:{ persistSession:true, autoRefreshToken:true,
-               storage: window.localStorage, storageKey:"mda_sb_auth" }
+        auth:{ persistSession:true, autoRefreshToken:true, storage:window.localStorage, storageKey:"mda_sb_auth" }
       });
       return true;
     }catch(e){ client=null; return false; }
@@ -2353,30 +2392,11 @@ const SB = (function(){
     try{
       const { data } = await client.auth.getSession();
       const u = data && data.session && data.session.user;
-      if(u && u.email){
-        state.session = { email:u.email, nome:nomeFromEmail(u.email) };
-        persist(); return true;
-      }
+      if(u && u.email){ state.session={ email:u.email, nome:nomeFromEmail(u.email) }; persist(); return true; }
     }catch(e){}
     state.session=null; persist(); return false;
   }
-  async function sendCode(email){
-    if(!client) throw new Error("Supabase não iniciado.");
-    const { error } = await client.auth.signInWithOtp({ email, options:{ shouldCreateUser:true } });
-    if(error) throw error;
-  }
-  async function verifyCode(email, code){
-    if(!client) throw new Error("Supabase não iniciado.");
-    const { data, error } = await client.auth.verifyOtp({ email, token:code, type:"email" });
-    if(error) throw error;
-    const em = (data && data.user && data.user.email) || email;
-    state.session = { email:em, nome:nomeFromEmail(em) }; persist();
-  }
-  // Senha determinística a partir do e-mail — o usuário nunca digita senha.
-  // (Segurança fraca por design: escolha do produto — só e-mail, sem validação.)
-  function derivePassword(email){ return "MeliDaily::" + String(email||"").toLowerCase() + "::v1"; }
-  // Login só com e-mail: tenta entrar; se não existe, cria (confirmação de
-  // e-mail precisa estar DESLIGADA no Supabase pra vir sessão na hora).
+  function derivePassword(email){ return "MeliDaily::"+String(email||"").toLowerCase()+"::v1"; }
   async function signInEmail(email){
     if(!client) throw new Error("Supabase não iniciado.");
     const password = derivePassword(email);
@@ -2386,7 +2406,7 @@ const SB = (function(){
       if(up.error) throw up.error;
       if(!(up.data && up.data.session)){
         r = await client.auth.signInWithPassword({ email, password });
-        if(r.error) throw new Error("Confirme que 'Confirm email' está DESLIGADO no Supabase. (" + r.error.message + ")");
+        if(r.error) throw new Error("Confirme que 'Confirm email' está DESLIGADO no Supabase. ("+r.error.message+")");
       }
     }
     const { data } = await client.auth.getUser();
@@ -2402,19 +2422,41 @@ const SB = (function(){
     if(!client) return state.groups||[];
     const { data, error } = await client.from("grupos").select("*").order("ordem",{ascending:true});
     if(!error && data){
-      state.groups = data.map(g=>({ id:g.id, label:g.label, area:g.area, estacao:g.estacao }));
+      state.groups = data.map(g=>({ id:g.id, label:g.label, setor:g.area, area:g.estacao, turno:g.turno }));
       persist();
     }
     return state.groups||[];
   }
+  // perfis (nomes editáveis)
+  async function loadProfiles(){
+    if(!client) return;
+    const { data, error } = await client.from("perfis").select("*");
+    if(!error && data){
+      const map={}; data.forEach(p=>{ map[(p.email||"").toLowerCase()] = p.nome; });
+      state.profiles = map; persist();
+    }
+  }
+  async function upsertProfile(email, nome){
+    if(!client) throw new Error("offline");
+    const { error } = await client.from("perfis").upsert({ email:email.toLowerCase(), nome, updated_at:new Date().toISOString() }, { onConflict:"email" });
+    if(error) throw error;
+    state.profiles = state.profiles||{}; state.profiles[email.toLowerCase()] = nome; persist();
+  }
+  async function ensureOwnProfile(){
+    const em = state.session && state.session.email; if(!em) return;
+    const has = state.profiles && state.profiles[em.toLowerCase()];
+    if(!has){ try{ await upsertProfile(em, nomeFromEmail(em)); }catch(e){} }
+  }
   async function pull(gid){
     if(!client || !gid) return;
-    const [a,f] = await Promise.all([
-      client.from("anotacoes").select("*").eq("grupo_id",gid).order("created_at",{ascending:false}),
+    const [a,t,f] = await Promise.all([
+      client.from("anotacoes").select("*").eq("grupo_id",gid).order("created_at",{ascending:true}),
+      client.from("tarefas").select("*").eq("grupo_id",gid).order("created_at",{ascending:true}),
       client.from("folgas").select("*").eq("grupo_id",gid).order("data",{ascending:true})
     ]);
-    gState.anotacoes = (a && a.data) ? a.data : [];
-    gState.folgas    = (f && f.data) ? f.data : [];
+    gState.anotacoes = (a&&a.data)?a.data:[];
+    gState.tarefas   = (t&&t.data)?t.data:[];
+    gState.folgas    = (f&&f.data)?f.data:[];
   }
   function subscribe(gid, onChange){
     if(!client || !gid) return;
@@ -2422,321 +2464,527 @@ const SB = (function(){
     try{
       channel = client.channel("grp-"+gid)
         .on("postgres_changes",{event:"*",schema:"public",table:"anotacoes",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"tarefas",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"folgas",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"perfis"}, onChange)
         .subscribe();
     }catch(e){}
   }
-  async function addNote(subcat, titulo, conteudo){
-    const row = { grupo_id:state.groupId, subcategoria:subcat, titulo, conteudo,
-      author_email:state.session.email, author_nome:state.session.nome };
-    const { error } = await client.from("anotacoes").insert(row); if(error) throw error;
+  const me = ()=>({ email:state.session.email, nome:(state.profiles&&state.profiles[state.session.email.toLowerCase()])||state.session.nome });
+  async function addNote(dia, subcat, titulo, conteudo){
+    const m=me();
+    const { error } = await client.from("anotacoes").insert({ grupo_id:state.groupId, dia, subcategoria:subcat, titulo, conteudo, author_email:m.email, author_nome:m.nome });
+    if(error) throw error;
+  }
+  async function addTask(dia, titulo){
+    const m=me();
+    const { error } = await client.from("tarefas").insert({ grupo_id:state.groupId, data:dia, titulo, author_email:m.email, author_nome:m.nome });
+    if(error) throw error;
+  }
+  async function updateTask(id, fields){
+    const { error } = await client.from("tarefas").update(fields).eq("id",id); if(error) throw error;
   }
   async function addFolgaRow(data, nomes){
-    const row = { grupo_id:state.groupId, data, nomes,
-      author_email:state.session.email, author_nome:state.session.nome };
-    const { error } = await client.from("folgas").insert(row); if(error) throw error;
+    const m=me();
+    const { error } = await client.from("folgas").insert({ grupo_id:state.groupId, data, nomes, author_email:m.email, author_nome:m.nome });
+    if(error) throw error;
   }
-  async function del(table, id){
-    const { error } = await client.from(table).delete().eq("id",id); if(error) throw error;
+  async function setFolgaStatus(id, status){
+    const m=me();
+    const { error } = await client.from("folgas").update({ status, aprovador_email:m.email, aprovador_nome:m.nome, decidido_em:new Date().toISOString() }).eq("id",id);
+    if(error) throw error;
   }
-  return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession,
-    sendCode, verifyCode, signInEmail, signOut, loadGroups, pull, subscribe, addNote, addFolgaRow, del };
+  async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
+
+  return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
+    loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, del };
 })();
 
-/* ---- helpers de UI ---- */
+/* ---------- helpers ---------- */
 function sysChat(text){ state.messages.push({kind:"system", text, t:Date.now()}); persist(); renderMessages(); }
-function sbErrMsg(e){ return (e && (e.message || e.error_description || e.msg)) || "erro desconhecido"; }
-function currentSubcatDefault(){
-  const g = (state.groups||[]).find(x=>x.id===state.groupId);
-  return g ? g.estacao : "GERAL";
+function sbErrMsg(e){ return (e && (e.message||e.error_description||e.msg)) || "erro"; }
+function nameFor(email){
+  if(!email) return "";
+  const k=String(email).toLowerCase();
+  return (state.profiles && state.profiles[k]) || SB.nomeFromEmail(email);
 }
+function isMine(email){ return state.session && email && email.toLowerCase()===state.session.email.toLowerCase(); }
+function selDay(){ return (dateInput && dateInput.value) || todayKey(); }
+function currentSubcatDefault(){ const g=(state.groups||[]).find(x=>x.id===state.groupId); return g?g.area:"GERAL"; }
+
+/* tooltip de e-mail (toque no nome) */
+let _tipEl=null;
+function hideTip(){ if(_tipEl&&_tipEl.parentNode) _tipEl.parentNode.removeChild(_tipEl); _tipEl=null; }
+function showTip(anchor, text){
+  hideTip();
+  _tipEl=document.createElement("div");
+  _tipEl.textContent=text;
+  _tipEl.style.cssText="position:fixed;z-index:200;background:#111;color:#fff;font:12px inherit;padding:6px 10px;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.35);max-width:82%";
+  document.body.appendChild(_tipEl);
+  const r=anchor.getBoundingClientRect();
+  _tipEl.style.left=Math.max(8, Math.min(r.left, window.innerWidth-_tipEl.offsetWidth-8))+"px";
+  _tipEl.style.top=(r.bottom+6)+"px";
+  setTimeout(hideTip, 2800);
+}
+document.addEventListener("scroll", hideTip, true);
+document.addEventListener("click", function(e){
+  const chip=e.target.closest && e.target.closest(".authchip[data-email]");
+  if(chip){ e.stopPropagation(); showTip(chip, chip.dataset.email); }
+}, true);
+
+function authChip(email){
+  return `<span class="authchip" data-email="${escapeHtml(email||"")}">${escapeHtml(nameFor(email))}</span>`;
+}
+
+/* ---------- painéis ---------- */
+function syncPanels(){
+  const local=document.getElementById("localNotesPanel");
+  const grp=document.getElementById("groupNotesPanel");
+  const gm=SB.groupMode();
+  if(local) local.style.display = gm?"none":"";
+  if(grp)   grp.style.display   = gm?"":"none";
+}
+
+/* ---------- render grupo: Anotações (consolidadas) + Tarefas ---------- */
+function renderGroupNotes(){
+  const panel=document.getElementById("groupNotesPanel"); if(!panel) return;
+  const day=selDay();
+  const notes=SB.gState.anotacoes.filter(n=>n.dia===day);
+  const tasks=SB.gState.tarefas.filter(t=>t.data===day);
+  let html="";
+
+  // ---- Anotações consolidadas por título ----
+  html += `<div class="subcat-h">Anotações — ${escapeHtml(formatPretty(day))}</div>`;
+  if(!notes.length){
+    html += `<div class="empty">Sem anotações neste dia. Escreva "Anotar: ..." no chat.</div>`;
+  }else{
+    const byTitle={};
+    notes.forEach(n=>{ const k=(n.titulo||"").toUpperCase(); (byTitle[k]=byTitle[k]||[]).push(n); });
+    Object.keys(byTitle).sort().forEach(title=>{
+      const entries=byTitle[title];
+      const lines=entries.map(n=>{
+        const del = isMine(n.author_email) ? `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>` : "";
+        return `<li style="margin:3px 0">${escapeHtml(n.conteudo||"")} — ${authChip(n.author_email)}${del}</li>`;
+      }).join("");
+      html += `<div class="item"><div class="check" style="visibility:hidden"></div>
+        <div class="item-body" style="min-width:0">
+          <div class="item-title">${escapeHtml(title)} <span style="font-weight:500;color:var(--ink-2)">· ${entries.length}</span></div>
+          <ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--ink-2);line-height:1.45">${lines}</ul>
+        </div></div>`;
+    });
+  }
+
+  // ---- Tarefas do dia ----
+  html += `<div class="subcat-h">Tarefas — ${escapeHtml(formatPretty(day))}</div>`;
+  if(!tasks.length){
+    html += `<div class="empty">Sem tarefas neste dia. Escreva "Tarefa: ..." no chat.</div>`;
+  }else{
+    tasks.forEach(t=>{
+      const mine=isMine(t.author_email);
+      html += `<div class="item ${t.concluida?"done":""}" data-taskid="${t.id}" data-mine="${mine?1:0}">
+        <div class="check">${t.concluida?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
+        <div class="item-body" style="min-width:0">
+          <div class="item-title">${escapeHtml(t.titulo||"")} ${authChip(t.author_email)}</div>
+        </div></div>`;
+    });
+  }
+  panel.innerHTML=html;
+
+  // apagar entrada de anotação (só autor via RLS)
+  panel.querySelectorAll(".ndel[data-id]").forEach(b=>{
+    b.addEventListener("click", (ev)=>{ ev.stopPropagation();
+      SB.del("anotacoes", b.dataset.id).then(refreshGroupAndRender).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+    });
+  });
+  // clique na tarefa: editar/apagar (só autor)
+  panel.querySelectorAll(".item[data-taskid]").forEach(el=>{
+    el.addEventListener("click",(ev)=>{
+      if(ev.target.closest(".authchip")) return;
+      openTaskActions(el, el.dataset.taskid, el.dataset.mine==="1");
+    });
+  });
+}
+
+function openTaskActions(el, id, mine){
+  if(el.querySelector(".task-actions")) return;
+  const task=SB.gState.tarefas.find(t=>t.id===id); if(!task) return;
+  const box=document.createElement("div");
+  box.className="task-actions";
+  box.style.cssText="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap";
+  if(mine){
+    box.innerHTML =
+      `<button class="ta-edit" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Editar</button>`+
+      `<button class="ta-del" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Apagar</button>`+
+      `<button class="ta-done" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">${task.concluida?"Reabrir":"Concluir"}</button>`;
+  }else{
+    box.innerHTML = `<span style="font-size:12px;color:var(--ink-2)">Só quem criou pode editar/apagar.</span>`;
+  }
+  el.querySelector(".item-body").appendChild(box);
+  const close=()=>{ if(box.parentNode) box.parentNode.removeChild(box); };
+  setTimeout(()=>{ document.addEventListener("click", function once(){ close(); document.removeEventListener("click", once); }); }, 50);
+  const eB=box.querySelector(".ta-edit"), dB=box.querySelector(".ta-del"), cB=box.querySelector(".ta-done");
+  if(eB) eB.addEventListener("click",(ev)=>{ ev.stopPropagation(); close(); editTaskInline(el, task); });
+  if(dB) dB.addEventListener("click",(ev)=>{ ev.stopPropagation(); close();
+    SB.del("tarefas", id).then(refreshGroupAndRender).then(()=>sysChat(`Tarefa "${task.titulo}" apagada.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  if(cB) cB.addEventListener("click",(ev)=>{ ev.stopPropagation(); close();
+    SB.updateTask(id,{concluida:!task.concluida}).then(refreshGroupAndRender).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+}
+
+function editTaskInline(el, task){
+  const body=el.querySelector(".item-body");
+  const box=document.createElement("div");
+  box.style.cssText="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap";
+  box.innerHTML=`<input type="text" class="ta-inp" value="${escapeHtml(task.titulo||"")}" style="flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:14px inherit">`+
+    `<button class="ta-save" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Salvar</button>`;
+  body.appendChild(box);
+  const inp=box.querySelector(".ta-inp"); inp.focus();
+  box.querySelector(".ta-save").addEventListener("click",(ev)=>{ ev.stopPropagation();
+    const v=(inp.value||"").trim(); if(!v) return;
+    SB.updateTask(task.id,{titulo:v}).then(refreshGroupAndRender).then(()=>sysChat(`Tarefa atualizada.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+  });
+}
+
+/* ---------- render grupo: Folgas (aprovar/recusar + ocultar passadas) ---------- */
+let showPastFolgas=false;
+function renderGroupFolgas(){
+  if(!folgasListEl) return;
+  const today=todayKey();
+  const all=SB.gState.folgas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||""));
+  const future=all.filter(f=>(f.data||"")>=today);
+  const past=all.filter(f=>(f.data||"")<today);
+  const list = showPastFolgas ? future.concat(past.slice().reverse()) : future;
+
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin:0 4px 8px">
+    <span style="font-size:12px;color:var(--ink-2)">${future.length} futura(s)${past.length?` · ${past.length} passada(s)`:""}</span>
+    ${past.length?`<button id="togglePast" style="background:none;border:0;color:var(--meli-blue);font:700 12px inherit;text-decoration:underline;cursor:pointer">${showPastFolgas?"Ocultar passadas":"Mostrar ocultas"}</button>`:""}
+  </div>`;
+
+  if(!list.length){
+    html += `<div class="empty">Sem folgas futuras.</div>`;
+  }else{
+    html += list.map(f=>{
+      const nomes=Array.isArray(f.nomes)?f.nomes:[];
+      const chips=nomes.length?nomes.map(n=>`<span class="folga-name-chip">${escapeHtml(n)}</span>`).join(""):`<span class="folga-empty">(sem nomes)</span>`;
+      const past=(f.data||"")<today;
+      const st=f.status||"pendente";
+      const stColor = st==="aprovado"?"#10B981":(st==="recusado"?"#EF4444":"#9CA3AF");
+      const stBadge=`<span style="background:${stColor};color:#fff;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700">${st}</span>`;
+      const aprov = (st!=="pendente" && f.aprovador_email) ? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:3px">por ${authChip(f.aprovador_email)}</div>` : "";
+      return `<div class="item" data-folgaid="${f.id}" data-mine="${isMine(f.author_email)?1:0}" style="${past?"opacity:.7":""}">
+        <div class="check" style="visibility:hidden"></div>
+        <div class="item-body" style="min-width:0">
+          <div class="item-title">${escapeHtml(formatPretty(f.data))} ${stBadge} ${authChip(f.author_email)}</div>
+          <div class="item-meta" style="flex-wrap:wrap;gap:4px">${chips}</div>
+          ${aprov}
+        </div></div>`;
+    }).join("");
+  }
+  folgasListEl.innerHTML=html;
+
+  const tg=document.getElementById("togglePast");
+  if(tg) tg.addEventListener("click",()=>{ showPastFolgas=!showPastFolgas; renderGroupFolgas(); });
+
+  folgasListEl.querySelectorAll(".item[data-folgaid]").forEach(el=>{
+    el.addEventListener("click",(ev)=>{ if(ev.target.closest(".authchip")) return;
+      openFolgaActions(el, el.dataset.folgaid, el.dataset.mine==="1"); });
+  });
+}
+
+function openFolgaActions(el, id, mine){
+  if(el.querySelector(".folga-actions")) return;
+  const f=SB.gState.folgas.find(x=>x.id===id); if(!f) return;
+  const box=document.createElement("div");
+  box.className="folga-actions";
+  box.style.cssText="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap";
+  box.innerHTML=
+    `<button class="fa-ok" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Aprovar</button>`+
+    `<button class="fa-no" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Recusar</button>`+
+    (mine?`<button class="fa-del" style="background:#6B7280;color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Apagar</button>`:"");
+  el.querySelector(".item-body").appendChild(box);
+  const close=()=>{ if(box.parentNode) box.parentNode.removeChild(box); };
+  setTimeout(()=>{ document.addEventListener("click", function once(){ close(); document.removeEventListener("click", once); }); }, 50);
+  box.querySelector(".fa-ok").addEventListener("click",(ev)=>{ ev.stopPropagation(); close();
+    SB.setFolgaStatus(id,"aprovado").then(refreshGroupAndRender).then(()=>sysChat(`Folga de ${escapeHtml(formatPretty(f.data))} aprovada.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  box.querySelector(".fa-no").addEventListener("click",(ev)=>{ ev.stopPropagation(); close();
+    SB.setFolgaStatus(id,"recusado").then(refreshGroupAndRender).then(()=>sysChat(`Folga de ${escapeHtml(formatPretty(f.data))} recusada.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  const d=box.querySelector(".fa-del");
+  if(d) d.addEventListener("click",(ev)=>{ ev.stopPropagation(); close();
+    SB.del("folgas",id).then(refreshGroupAndRender).then(()=>sysChat("Folga apagada.")).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+}
+
+/* ---------- resumo do dia na Conversa ---------- */
+function updateDaySummary(){
+  const chat=document.getElementById("chatPage"); if(!chat) return;
+  let card=document.getElementById("daySummary");
+  if(!SB.groupMode()){ if(card) card.style.display="none"; return; }
+  if(!card){
+    card=document.createElement("div");
+    card.id="daySummary";
+    card.style.cssText="background:#FFF;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 4px 12px;box-shadow:0 1px 2px rgba(0,0,0,.06)";
+    chat.insertBefore(card, chat.firstChild);
+  }
+  card.style.display="";
+  const day=todayKey();
+  const notes=SB.gState.anotacoes.filter(n=>n.dia===day);
+  const tasks=SB.gState.tarefas.filter(t=>t.data===day);
+  const folgas=SB.gState.folgas.filter(f=>f.data===day);
+  const titulos=[...new Set(notes.map(n=>(n.titulo||"").toUpperCase()))];
+  let h=`<div style="font-weight:800;font-size:14px;margin-bottom:6px">Resumo de hoje · ${escapeHtml(state.groupLabel||"")}</div>`;
+  h+=`<div style="font-size:13px;color:var(--ink-2);line-height:1.5">`;
+  h+=`<b>Folgas:</b> ${folgas.length?folgas.map(f=>escapeHtml((Array.isArray(f.nomes)?f.nomes.join(", "):"")||"—")+" ("+escapeHtml(f.status||"pendente")+")").join("; "):"nenhuma"}<br>`;
+  h+=`<b>Tarefas:</b> ${tasks.length?tasks.map(t=>escapeHtml(t.titulo)+(t.concluida?" ✓":"")).join("; "):"nenhuma"}<br>`;
+  h+=`<b>Anotações:</b> ${titulos.length?titulos.map(escapeHtml).join(", ")+" ("+notes.length+" no total)":"nenhuma"}`;
+  h+=`</div>`;
+  card.innerHTML=h;
+}
+
+/* ---------- refresh central ---------- */
 function refreshGroupAndRender(){
   return SB.pull(state.groupId).then(()=>{
+    updateDaySummary();
     if(active===1) renderTasksView();
     if(active===2) renderFolgasView();
   });
 }
 let _rtTimer=null;
-function onRealtime(){ clearTimeout(_rtTimer); _rtTimer=setTimeout(()=>{ refreshGroupAndRender(); }, 250); }
+function onRealtime(){ clearTimeout(_rtTimer); _rtTimer=setTimeout(()=>{ SB.loadProfiles().then(refreshGroupAndRender); }, 250); }
 
-/* ---- painéis: alterna local x grupo na aba Anotações ---- */
-function syncPanels(){
-  const local = document.getElementById("localNotesPanel");
-  const grp   = document.getElementById("groupNotesPanel");
-  const strip = document.querySelector("#tasksPage .date-strip");
-  const gm = SB.groupMode();
-  if(local) local.style.display = gm ? "none" : "";
-  if(grp)   grp.style.display   = gm ? "" : "none";
-  if(strip) strip.style.display = gm ? "none" : "";
-}
-
-/* ---- render grupo: anotações por subcategoria + autor ---- */
-function renderGroupNotes(){
-  const panel = document.getElementById("groupNotesPanel");
-  if(!panel) return;
-  const rows = SB.gState.anotacoes.slice();
-  if(!rows.length){
-    panel.innerHTML = `<div class="empty">Sem anotações em <b>${escapeHtml(state.groupLabel||"este grupo")}</b>. Escreva "Anotar: ..." no chat.</div>`;
-    return;
-  }
-  const bySub = {};
-  rows.forEach(r=>{ const k=(r.subcategoria||"GERAL"); (bySub[k]=bySub[k]||[]).push(r); });
-  let html = "";
-  Object.keys(bySub).sort().forEach(sub=>{
-    html += `<div class="subcat-h">${escapeHtml(sub)} · ${bySub[sub].length}</div>`;
-    bySub[sub].forEach(r=>{
-      const autor = escapeHtml(r.author_nome || SB.nomeFromEmail(r.author_email));
-      html += `<div class="item" data-gid="${r.id}" data-gtable="anotacoes">
-        <div class="check" style="visibility:hidden"></div>
-        <div class="item-body" style="min-width:0">
-          <div class="item-title">${escapeHtml(r.titulo||"(sem título)")}<span class="authchip">${autor}</span></div>
-          ${r.conteudo?`<div class="item-meta"><span style="word-break:break-word">${escapeHtml(r.conteudo)}</span></div>`:""}
-        </div>
-      </div>`;
-    });
-  });
-  panel.innerHTML = html;
-  panel.querySelectorAll(".item[data-gid]").forEach(el=>{
-    attachGroupLongPressDelete(el, el.dataset.gid, el.dataset.gtable);
-  });
-}
-
-/* long-press num item de grupo -> mostra botão Apagar (some em 4s) */
-function attachGroupLongPressDelete(el, id, table){
-  let timer=null;
-  const arm=()=>{
-    if(el.querySelector(".gdel")) return;
-    const b=document.createElement("button");
-    b.className="gdel"; b.textContent="Apagar";
-    b.style.cssText="margin-top:8px;background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit";
-    b.addEventListener("click",(ev)=>{
-      ev.stopPropagation();
-      SB.del(table,id).then(refreshGroupAndRender)
-        .then(()=>sysChat("Item apagado do grupo."))
-        .catch(e=>sysChat("Erro ao apagar: "+sbErrMsg(e)));
-    });
-    const body = el.querySelector(".item-body"); if(body) body.appendChild(b);
-    setTimeout(()=>{ if(b.parentNode) b.parentNode.removeChild(b); }, 4000);
-  };
-  el.addEventListener("touchstart",()=>{ timer=setTimeout(arm,600); },{passive:true});
-  el.addEventListener("touchend",()=>{ clearTimeout(timer); });
-  el.addEventListener("touchmove",()=>{ clearTimeout(timer); });
-  el.addEventListener("dblclick", arm); // fallback desktop
-}
-
-/* ---- comandos de chat roteados p/ o grupo (retorna true se tratou) ---- */
+/* ---------- comandos de chat no grupo ---------- */
 function handleGroupCommand(trimmed){
-  const noteMatch = trimmed.match(NOTE_TRIGGER);
+  const noteMatch=trimmed.match(NOTE_TRIGGER);
   if(noteMatch){
-    const parsed = parseNoteBody(noteMatch[1]);
-    if(!parsed){ sysChat(`Pra anotar no grupo, manda "Anotar: <texto>" ou "Anotar TÍTULO: <texto>".`); return true; }
-    if(!parsed.text){ sysChat(`Qual o conteúdo da anotação "${parsed.title}"?`); return true; }
-    const sub = currentSubcatDefault();
-    SB.addNote(sub, parsed.title, parsed.text).then(refreshGroupAndRender)
-      .then(()=>sysChat(`Anotação "${parsed.title}" criada em ${state.groupLabel} · ${sub}.`))
-      .catch(e=>sysChat("Erro ao salvar no grupo: "+sbErrMsg(e)));
+    const parsed=parseNoteBody(noteMatch[1]);
+    if(!parsed){ sysChat(`Pra anotar, manda "Anotar TÍTULO: conteúdo".`); return true; }
+    if(!parsed.text){ sysChat(`Qual o conteúdo da anotação "${parsed.title.toUpperCase()}"?`); return true; }
+    const dia=selDay(), titulo=parsed.title.toUpperCase(), sub=currentSubcatDefault();
+    SB.addNote(dia, sub, titulo, parsed.text).then(refreshGroupAndRender)
+      .then(()=>sysChat(`Anotação "${titulo}" adicionada (${formatPretty(dia)}).`))
+      .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
     return true;
   }
-  const tm = trimmed.match(TASK_TRIGGER);
+  const tm=trimmed.match(TASK_TRIGGER);
   if(tm && tm[1] && tm[1].trim()){
-    const rest = tm[1].trim();
-    const titulo = rest.length>60 ? rest.slice(0,60) : rest;
-    SB.addNote("TAREFAS", titulo, rest).then(refreshGroupAndRender)
-      .then(()=>sysChat(`Anotação "${titulo}" criada em ${state.groupLabel} · TAREFAS.`))
-      .catch(e=>sysChat("Erro ao salvar no grupo: "+sbErrMsg(e)));
+    const rest=tm[1].trim(), dia=selDay();
+    SB.addTask(dia, rest).then(refreshGroupAndRender)
+      .then(()=>sysChat(`Tarefa "${rest}" criada (${formatPretty(dia)}).`))
+      .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
     return true;
   }
-  const ex = trimmed.match(EXCLUIR_TRIGGER);
+  const ex=trimmed.match(EXCLUIR_TRIGGER);
   if(ex){
-    const target = ex[1].trim().toLowerCase();
-    const row = SB.gState.anotacoes.find(r=>(r.titulo||"").toLowerCase()===target)
-             || SB.gState.anotacoes.find(r=>(r.titulo||"").toLowerCase().includes(target));
-    if(!row){ sysChat(`Não achei "${ex[1].trim()}" neste grupo.`); return true; }
+    const target=ex[1].trim().toLowerCase();
+    const row=SB.gState.anotacoes.find(r=>isMine(r.author_email)&&(r.titulo||"").toLowerCase()===target)
+           || SB.gState.anotacoes.find(r=>isMine(r.author_email)&&(r.titulo||"").toLowerCase().includes(target));
+    if(!row){ sysChat(`Não achei uma anotação sua com "${ex[1].trim()}".`); return true; }
     SB.del("anotacoes", row.id).then(refreshGroupAndRender)
       .then(()=>sysChat(`Anotação "${row.titulo}" apagada.`))
-      .catch(e=>sysChat("Erro ao apagar: "+sbErrMsg(e)));
+      .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
     return true;
   }
-  return false; // não é comando de dados -> deixa o handleAI normal responder
+  return false;
 }
 
-/* ---- wrappers das funções existentes (reassign; bindings mutáveis) ---- */
-const _handleAI = handleAI;
-handleAI = function(text){
-  if(SB.groupMode()){
-    const trimmed = cleanInput(text);
-    if(handleGroupCommand(trimmed)) return;
-  }
+/* ---------- wrappers ---------- */
+const _handleAI=handleAI;
+handleAI=function(text){
+  if(SB.groupMode()){ const t=cleanInput(text); if(handleGroupCommand(t)) return; }
   return _handleAI(text);
 };
-const _renderTasksView = renderTasksView;
-renderTasksView = function(){
-  syncPanels();
-  if(SB.groupMode()){ renderGroupNotes(); return; }
-  return _renderTasksView();
-};
-const _renderFolgasView = renderFolgasView;
-renderFolgasView = function(){
-  if(SB.groupMode()){ renderGroupFolgas(); return; }
-  return _renderFolgasView();
-};
-// Chamada pelo addFolga original quando em groupMode (o botão capturou a
-// referência original, então não dá pra sobrescrever addFolga por reassign).
+const _renderMessages=renderMessages;
+renderMessages=function(){ const r=_renderMessages.apply(this, arguments); try{ updateDaySummary(); }catch(e){} return r; };
+const _renderTasksView=renderTasksView;
+renderTasksView=function(){ syncPanels(); if(SB.groupMode()){ renderGroupNotes(); return; } return _renderTasksView(); };
+const _renderFolgasView=renderFolgasView;
+renderFolgasView=function(){ if(SB.groupMode()){ renderGroupFolgas(); return; } return _renderFolgasView(); };
 function addFolgaGroup(){
   if(!folgaDateInputEl || !folgaNamesInputEl) return;
-  const date = folgaDateInputEl.value || "";
+  const date=folgaDateInputEl.value||"";
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ sysChat("Folga: data inválida (use o seletor)."); return; }
-  const nomes = parseNames(folgaNamesInputEl.value || "");
+  const nomes=parseNames(folgaNamesInputEl.value||"");
   SB.addFolgaRow(date, nomes).then(refreshGroupAndRender)
-    .then(()=>{ sysChat(`Folga de ${nomes.join(", ")||"(sem nomes)"} (${formatPretty(date)}) criada em ${state.groupLabel}.`);
-                folgaNamesInputEl.value=""; folgaNamesInputEl.focus(); })
+    .then(()=>{ sysChat(`Folga de ${nomes.join(", ")||"(sem nomes)"} (${formatPretty(date)}) criada — pendente.`); folgaNamesInputEl.value=""; folgaNamesInputEl.focus(); })
     .catch(e=>sysChat("Erro ao salvar folga: "+sbErrMsg(e)));
 }
 
-/* render folgas do grupo (com autor) */
-function renderGroupFolgas(){
-  if(!folgasListEl) return;
-  const list = SB.gState.folgas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||""));
-  if(!list.length){ folgasListEl.innerHTML = `<div class="empty">Sem folgas em ${escapeHtml(state.groupLabel||"este grupo")}.</div>`; return; }
-  folgasListEl.innerHTML = list.map(f=>{
-    const nomes = Array.isArray(f.nomes)?f.nomes:[];
-    const chips = nomes.length ? nomes.map(n=>`<span class="folga-name-chip">${escapeHtml(n)}</span>`).join("")
-                               : `<span class="folga-empty">(sem nomes)</span>`;
-    const autor = escapeHtml(f.author_nome || SB.nomeFromEmail(f.author_email));
-    return `<div class="item" data-gid="${f.id}" data-gtable="folgas">
-      <div class="check" style="visibility:hidden"></div>
-      <div class="item-body" style="min-width:0">
-        <div class="item-title">${escapeHtml(formatPretty(f.data))}<span class="authchip">${autor}</span></div>
-        <div class="item-meta" style="flex-wrap:wrap;gap:4px">${chips}</div>
-      </div>
-    </div>`;
-  }).join("");
-  folgasListEl.querySelectorAll(".item[data-gid]").forEach(el=>{
-    attachGroupLongPressDelete(el, el.dataset.gid, el.dataset.gtable);
-  });
+/* ---------- barra de grupo (rótulo, toca p/ config) ---------- */
+function renderGroupBar(){
+  const bar=document.getElementById("groupBar"); if(!bar) return;
+  if(!SB.groupMode()){ bar.style.display="none"; return; }
+  bar.style.display="flex"; bar.style.cursor="pointer";
+  bar.innerHTML=`<span class="group-bar-icon">👥</span>
+    <span style="flex:1;min-width:0;font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(state.groupLabel||"—")}</span>
+    <span style="font-size:11px;color:var(--ink-2)">trocar ⚙️</span>`;
+  bar.onclick=()=>{ if(shade) shade.classList.add("open"); const box=document.getElementById("sbGroupBox"); if(box) box.scrollIntoView({behavior:"smooth",block:"start"}); };
 }
 
-/* ---- login overlay ---- */
-const loginShade = document.getElementById("loginShade");
+/* ---------- login overlay ---------- */
+const loginShade=document.getElementById("loginShade");
 function showLogin(on){ if(loginShade) loginShade.classList.toggle("open", !!on); }
-function showGroupBar(on){ const b=document.getElementById("groupBar"); if(b) b.style.display = on?"flex":"none"; }
-function populateGroupSelect(){
-  const sel = document.getElementById("groupSelect"); if(!sel) return;
-  sel.innerHTML = (state.groups||[]).map(g=>`<option value="${g.id}">${escapeHtml(g.label)}</option>`).join("");
-  if(state.groupId) sel.value = state.groupId;
-}
 function updateSbUI(){
-  const st = document.getElementById("sbStatus");
-  const bd = document.getElementById("sbBadge");
-  const urlI = document.getElementById("sbUrlInput");
-  const keyI = document.getElementById("sbKeyInput");
-  if(urlI) urlI.value = state.sb.url || "";
-  if(keyI) keyI.value = state.sb.anonKey || "";
-  if(window.__sbCdnFailed && SB.configured()){
-    if(st) st.textContent = "SDK offline — abra com internet"; if(bd) bd.textContent="offline"; return;
-  }
+  const st=document.getElementById("sbStatus"), bd=document.getElementById("sbBadge");
+  const urlI=document.getElementById("sbUrlInput"), keyI=document.getElementById("sbKeyInput");
+  const box=document.getElementById("sbGroupBox");
+  if(urlI) urlI.value=state.sb.url||"";
+  if(keyI) keyI.value=state.sb.anonKey||"";
+  if(box) box.style.display = SB.loggedIn()?"":"none";
+  if(window.__sbCdnFailed && SB.configured()){ if(st) st.textContent="SDK offline — abra com internet"; if(bd) bd.textContent="offline"; return; }
   if(!SB.configured()){ if(st) st.textContent="local (sem grupo)"; if(bd) bd.textContent="local"; return; }
   if(!SB.loggedIn()){ if(st) st.textContent="configurado — falta entrar"; if(bd) bd.textContent="login"; return; }
-  if(st) st.textContent = `${state.session.email} · ${state.groupLabel||"escolha um grupo"}`;
-  if(bd) bd.textContent = "on";
+  if(st) st.textContent=`${state.session.email} · ${state.groupLabel||"escolha um grupo"}`;
+  if(bd) bd.textContent="on";
+}
+
+/* 3 seletores em cascata */
+function populateSelectors(){
+  const sSet=document.getElementById("selSetor"), sAr=document.getElementById("selArea"), sTu=document.getElementById("selTurno");
+  if(!sSet) return;
+  const cur=(state.groups||[]).find(g=>g.id===state.groupId);
+  const setors=Object.keys(GROUP_TREE);
+  sSet.innerHTML=setors.map(s=>`<option value="${s}">${s}</option>`).join("");
+  const curSet = cur?cur.setor:setors[0];
+  sSet.value=curSet;
+  function fillAreas(setor, keepArea){
+    const areas=Object.keys(GROUP_TREE[setor]||{});
+    sAr.innerHTML=areas.map(a=>`<option value="${a}">${a}</option>`).join("");
+    sAr.value = (keepArea && areas.includes(keepArea)) ? keepArea : areas[0];
+    fillTurnos(setor, sAr.value, cur&&cur.setor===setor?cur.turno:null);
+  }
+  function fillTurnos(setor, area, keepTurno){
+    const turnos=(GROUP_TREE[setor]&&GROUP_TREE[setor][area])||[];
+    sTu.innerHTML=turnos.map(t=>`<option value="${t}">${t}</option>`).join("");
+    sTu.value = (keepTurno && turnos.includes(keepTurno)) ? keepTurno : turnos[0];
+  }
+  fillAreas(curSet, cur?cur.area:null);
+  sSet.onchange=()=>fillAreas(sSet.value, null);
+  sAr.onchange=()=>fillTurnos(sSet.value, sAr.value, null);
+  sTu.onchange=()=>applyGroupSelection();
+  const cl=document.getElementById("curGroupLabel"); if(cl) cl.textContent=state.groupLabel||"—";
+}
+async function applyGroupSelection(){
+  const setor=document.getElementById("selSetor").value;
+  const area=document.getElementById("selArea").value;
+  const turno=document.getElementById("selTurno").value;
+  const g=(state.groups||[]).find(x=>x.setor===setor && x.area===area && x.turno===turno);
+  if(!g){ sysChat("Grupo não encontrado. Rode o schema.sql atualizado no Supabase."); return; }
+  state.groupId=g.id; state.groupLabel=g.label; persist();
+  const cl=document.getElementById("curGroupLabel"); if(cl) cl.textContent=g.label;
+  renderGroupBar();
+  await SB.pull(g.id); SB.subscribe(g.id, onRealtime);
+  updateSbUI();
+  updateDaySummary();
+  if(active===1) renderTasksView();
+  if(active===2) renderFolgasView();
+}
+
+/* lista de perfis (nomes editáveis) */
+function renderProfilesList(){
+  const box=document.getElementById("profilesList"); if(!box) return;
+  const entries=Object.keys(state.profiles||{}).sort();
+  if(!entries.length){ box.innerHTML=`<div class="desc" style="padding:4px">Nenhum nome cadastrado ainda.</div>`; return; }
+  box.innerHTML=entries.map(em=>`
+    <div style="display:flex;gap:6px;align-items:center;margin:5px 0">
+      <input type="text" data-email="${escapeHtml(em)}" value="${escapeHtml(state.profiles[em]||"")}" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:13px inherit">
+      <button class="pf-save" data-email="${escapeHtml(em)}" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 10px;font:700 12px inherit">OK</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink-2);margin:-2px 0 4px 2px">${escapeHtml(em)}</div>`).join("");
+  box.querySelectorAll(".pf-save").forEach(b=>{
+    b.addEventListener("click",()=>{
+      const em=b.dataset.email;
+      const inp=b.parentNode.querySelector("input[data-email]");
+      const v=(inp.value||"").trim(); if(!v) return;
+      SB.upsertProfile(em, v).then(()=>{ renderProfilesList(); refreshGroupAndRender(); sysChat(`Nome atualizado: ${v}`); })
+        .catch(e=>sysChat("Erro ao salvar nome: "+sbErrMsg(e)));
+    });
+  });
 }
 
 async function afterLogin(){
   showLogin(false);
   await SB.loadGroups();
+  await SB.loadProfiles();
+  await SB.ensureOwnProfile();
   if(!state.groupId && state.groups[0]){ state.groupId=state.groups[0].id; state.groupLabel=state.groups[0].label; persist(); }
-  populateGroupSelect();
-  showGroupBar(true);
+  populateSelectors();
+  renderProfilesList();
+  renderGroupBar();
+  const my=document.getElementById("myNameInput");
+  if(my) my.value = nameFor(state.session.email);
   if(state.groupId){ await SB.pull(state.groupId); SB.subscribe(state.groupId, onRealtime); }
-  updateSbUI();
+  updateSbUI(); updateDaySummary();
   if(active===1) renderTasksView();
   if(active===2) renderFolgasView();
 }
 
 async function sbBoot(){
-  // logo no card de login (reusa o avatar do header)
-  const av = document.querySelector(".header .avatar img");
-  const ll = document.getElementById("loginLogo");
-  if(av && ll) ll.src = av.src;
+  const av=document.querySelector(".header .avatar img"), ll=document.getElementById("loginLogo");
+  if(av && ll) ll.src=av.src;
   updateSbUI();
-  if(!SB.configured()){ showLogin(false); showGroupBar(false); return; }
-  if(!SB.init()){ showLogin(false); showGroupBar(false); updateSbUI(); return; }
-  const ok = await SB.restoreSession();
-  if(!ok){ showLogin(true); showGroupBar(false); updateSbUI(); return; }
+  if(!SB.configured()){ showLogin(false); renderGroupBar(); return; }
+  if(!SB.init()){ showLogin(false); renderGroupBar(); updateSbUI(); return; }
+  const ok=await SB.restoreSession();
+  if(!ok){ showLogin(true); renderGroupBar(); updateSbUI(); return; }
   await afterLogin();
 }
 
-/* botão "usar sem grupo (local)" no login */
-(function addLocalEscape(){
-  const card = loginShade && loginShade.querySelector(".login-card");
-  if(!card) return;
-  const a = document.createElement("button");
-  a.className="link"; a.textContent="Usar sem grupo (modo local)";
-  a.addEventListener("click", ()=>{ showLogin(false); });
-  card.appendChild(a);
+/* botão "usar sem grupo (local)" */
+(function(){
+  const card=loginShade && loginShade.querySelector(".login-card"); if(!card) return;
+  const a=document.createElement("button"); a.className="link"; a.textContent="Usar sem grupo (modo local)";
+  a.addEventListener("click", ()=>showLogin(false)); card.appendChild(a);
 })();
 
-/* handler de login — só e-mail, entra direto */
-(function bindLogin(){
-  const emailI=document.getElementById("loginEmail");
-  const sendB=document.getElementById("loginSendBtn");
-  const msg=document.getElementById("loginMsg");
-  function setMsg(t, cls){ if(msg){ msg.textContent=t||""; msg.className="login-msg"+(cls?(" "+cls):""); } }
+/* login handlers (só e-mail) */
+(function(){
+  const emailI=document.getElementById("loginEmail"), sendB=document.getElementById("loginSendBtn"), msg=document.getElementById("loginMsg");
+  function setMsg(t,cls){ if(msg){ msg.textContent=t||""; msg.className="login-msg"+(cls?(" "+cls):""); } }
   async function doLogin(){
     const email=(emailI.value||"").trim().toLowerCase();
     if(!/@mercadolivre\.com$/.test(email)){ setMsg("Use um e-mail @mercadolivre.com.","err"); return; }
     sendB.disabled=true; setMsg("Entrando...");
-    try{
-      if(!SB.init()) throw new Error("Configuração Supabase ausente.");
-      await SB.signInEmail(email);
-      setMsg("Entrou! ✓","ok");
-      await afterLogin();
-    }catch(e){ setMsg("Falha ao entrar: "+sbErrMsg(e),"err"); }
+    try{ if(!SB.init()) throw new Error("Config ausente."); await SB.signInEmail(email); setMsg("Entrou! ✓","ok"); await afterLogin(); }
+    catch(e){ setMsg("Falha ao entrar: "+sbErrMsg(e),"err"); }
     finally{ sendB.disabled=false; }
   }
   if(sendB) sendB.addEventListener("click", doLogin);
-  if(emailI) emailI.addEventListener("keydown", (e)=>{ if(e.key==="Enter") doLogin(); });
+  if(emailI) emailI.addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
 })();
 
-/* seletor de grupo */
-(function bindGroupSelect(){
-  const sel=document.getElementById("groupSelect"); if(!sel) return;
-  sel.addEventListener("change", async ()=>{
-    const gid=sel.value;
-    const g=(state.groups||[]).find(x=>x.id===gid);
-    state.groupId=gid; state.groupLabel=g?g.label:""; persist();
-    await SB.pull(gid); SB.subscribe(gid, onRealtime);
-    updateSbUI();
-    if(active===1) renderTasksView();
-    if(active===2) renderFolgasView();
+/* meu nome */
+(function(){
+  const b=document.getElementById("myNameSave"); if(!b) return;
+  b.addEventListener("click", ()=>{
+    const v=(document.getElementById("myNameInput").value||"").trim(); if(!v) return;
+    SB.upsertProfile(state.session.email, v).then(()=>{ renderProfilesList(); refreshGroupAndRender(); renderGroupBar(); sysChat(`Seu nome agora é ${v}.`); })
+      .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
   });
 })();
 
-/* settings: salvar/conectar e sair */
-(function bindSbSettings(){
-  const saveB=document.getElementById("sbSave");
-  const outB=document.getElementById("sbLogout");
+/* settings: salvar config e sair */
+(function(){
+  const saveB=document.getElementById("sbSave"), outB=document.getElementById("sbLogout");
   if(saveB) saveB.addEventListener("click", async ()=>{
     const url=(document.getElementById("sbUrlInput").value||"").trim().replace(/\/+$/,"");
     const key=(document.getElementById("sbKeyInput").value||"").trim();
-    state.sb = { url, anonKey:key }; persist();
-    if(!url || !key){ updateSbUI(); sysChat("Config limpa — modo local."); return; }
-    if(window.__sbCdnFailed){ updateSbUI(); sysChat("SDK do Supabase não carregou (sem internet?). Abra o app online e tente de novo."); return; }
-    if(!SB.init()){ updateSbUI(); sysChat("Não consegui iniciar o Supabase. Confira URL/chave."); return; }
-    const ok = await SB.restoreSession();
-    if(ok){ await afterLogin(); sysChat("Conectado ao grupo. ✓"); }
-    else { showLogin(true); }
+    state.sb={ url, anonKey:key }; persist();
+    if(!url||!key){ updateSbUI(); sysChat("Config limpa — modo local."); return; }
+    if(window.__sbCdnFailed){ updateSbUI(); sysChat("SDK não carregou (sem internet?)."); return; }
+    if(!SB.init()){ updateSbUI(); sysChat("Não consegui iniciar o Supabase."); return; }
+    const ok=await SB.restoreSession();
+    if(ok){ await afterLogin(); sysChat("Conectado. ✓"); } else { showLogin(true); }
     if(shade) shade.classList.remove("open");
   });
   if(outB) outB.addEventListener("click", async ()=>{
-    await SB.signOut();
-    showGroupBar(false); syncPanels(); updateSbUI();
+    await SB.signOut(); renderGroupBar(); syncPanels(); updateSbUI();
     if(active===1) renderTasksView(); if(active===2) renderFolgasView();
     sysChat("Você saiu do grupo. Modo local ativo.");
   });
 })();
 
-/* BOOT do módulo de grupos */
+/* mudança de dia (grupo) — o listener original chama a versão local */
+if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && active===1) renderGroupNotes(); });
+
+/* BOOT */
 sbBoot();
 
 </script>
