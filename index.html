@@ -575,7 +575,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="0">Conversa</div>
     <div class="tab" data-tab="1">Anotações</div>
-    <div class="tab" data-tab="2">Folgas</div>
+    <div class="tab" data-tab="2" id="tab3"><span id="tab3Label">Folgas</span> <span style="font-size:10px;opacity:.7">▾</span></div>
   </div>
 
   <!-- Barra de grupo: só aparece quando logado num grupo compartilhado. -->
@@ -630,16 +630,33 @@
 
       <!-- Aba Folgas — planning de dias off com nomes -->
       <section class="page folgasview" id="folgasPage">
-        <div class="folgas-add">
-          <div class="folgas-add-row">
-            <input type="date" id="folgaDateInput">
-            <input type="text" id="folgaNamesInput" placeholder="Nomes (separe com vírgula)" autocomplete="off" autocapitalize="words">
+        <!-- Base compartilhada de nomes (folgas + feedback) -->
+        <datalist id="nameBase"></datalist>
+
+        <!-- Visão FOLGAS -->
+        <div id="folgasView">
+          <div class="folgas-add">
+            <div class="folgas-add-row">
+              <input type="date" id="folgaDateInput">
+              <input type="text" id="folgaNamesInput" list="nameBase" placeholder="Nomes (separe com vírgula)" autocomplete="off" autocapitalize="words">
+            </div>
+            <input type="text" id="folgaMotivoInput" placeholder="Motivo (opcional)" autocomplete="off" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit;margin-top:6px">
+            <button class="folgas-add-btn" id="folgaAddBtn">+ Adicionar folga</button>
           </div>
-          <input type="text" id="folgaMotivoInput" placeholder="Motivo (opcional)" autocomplete="off" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit;margin-top:6px">
-          <button class="folgas-add-btn" id="folgaAddBtn">+ Adicionar folga</button>
+          <div class="section-h">Folgas planejadas</div>
+          <div id="folgasList"></div>
         </div>
-        <div class="section-h">Folgas planejadas</div>
-        <div id="folgasList"></div>
+
+        <!-- Visão FEEDBACK -->
+        <div id="feedbackView" style="display:none">
+          <div class="folgas-add">
+            <input type="text" id="fbNameInput" list="nameBase" placeholder="Nome da pessoa" autocomplete="off" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit">
+            <textarea id="fbTextInput" rows="2" placeholder="Feedback / anotação sobre a pessoa" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px;font:14px inherit;margin-top:6px;resize:none"></textarea>
+            <button class="folgas-add-btn" id="fbAddBtn">+ Adicionar feedback</button>
+          </div>
+          <div class="section-h">Feedbacks de <span id="fbPersonLabel">—</span></div>
+          <div id="feedbackList"></div>
+        </div>
       </section>
 
     </div>
@@ -893,7 +910,8 @@ const seed = () => ({
   session: null,                    // { email, nome } quando logado
   groupId: "",                      // grupo selecionado atualmente
   groupLabel: "",                   // rótulo do grupo (cache p/ header)
-  groups: []                        // lista de grupos carregada do servidor
+  groups: [],                       // lista de grupos carregada do servidor
+  thirdView: "folgas"               // 3ª aba: "folgas" | "feedback"
 });
 
 /* Defensive migration: keeps unknown fields, never throws on bad shape. */
@@ -935,6 +953,7 @@ function migrate(s){
   if(typeof s.groupId !== "string") s.groupId = "";
   if(typeof s.groupLabel !== "string") s.groupLabel = "";
   if(!Array.isArray(s.groups)) s.groups = [];
+  if(s.thirdView!=="folgas" && s.thirdView!=="feedback") s.thirdView="folgas";
   // v0.1.25 — Folgas (planning de dias off com nomes)
   if(!Array.isArray(s.folgas)) s.folgas = [];
   s.folgas = s.folgas.filter(f =>
@@ -977,7 +996,7 @@ function setTab(i){
   const stack = document.getElementById("bottomStack");
   if(stack) stack.style.display = (i === 0) ? "block" : "none";
   if(i===1) renderTasksView();
-  if(i===2) renderFolgasView();
+  if(i===2) applyThirdView();
 }
 tabs.forEach(t=>t.addEventListener("click",()=>setTab(+t.dataset.tab)));
 
@@ -2358,9 +2377,7 @@ try {
   let deferred=null;
   const slot=document.getElementById("installSlot");
   const btn=document.getElementById("installBtnSettings");
-  window.addEventListener("beforeinstallprompt", (e)=>{
-    e.preventDefault(); deferred=e; if(slot) slot.style.display="";
-  });
+  window.addEventListener("beforeinstallprompt", (e)=>{ e.preventDefault(); deferred=e; if(slot) slot.style.display=""; });
   if(btn) btn.addEventListener("click", async ()=>{
     if(!deferred) return;
     deferred.prompt();
@@ -2454,7 +2471,7 @@ const GROUP_TREE = {
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2535,14 +2552,16 @@ const SB = (function(){
   }
   async function pull(gid){
     if(!client || !gid) return;
-    const [a,t,f] = await Promise.all([
+    const [a,t,f,fb] = await Promise.all([
       client.from("anotacoes").select("*").eq("grupo_id",gid).order("created_at",{ascending:true}),
       client.from("tarefas").select("*").eq("grupo_id",gid).order("created_at",{ascending:true}),
-      client.from("folgas").select("*").eq("grupo_id",gid).order("data",{ascending:true})
+      client.from("folgas").select("*").eq("grupo_id",gid).order("data",{ascending:true}),
+      client.from("feedbacks").select("*").eq("grupo_id",gid).order("created_at",{ascending:false})
     ]);
     gState.anotacoes = (a&&a.data)?a.data:[];
     gState.tarefas   = (t&&t.data)?t.data:[];
     gState.folgas    = (f&&f.data)?f.data:[];
+    gState.feedbacks = (fb&&fb.data)?fb.data:[];
   }
   function subscribe(gid, onChange){
     if(!client || !gid) return;
@@ -2552,6 +2571,7 @@ const SB = (function(){
         .on("postgres_changes",{event:"*",schema:"public",table:"anotacoes",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"tarefas",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"folgas",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"feedbacks",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"perfis"}, onChange)
         .subscribe();
     }catch(e){}
@@ -2587,6 +2607,11 @@ const SB = (function(){
     const { error } = await client.from("folgas").update({ status, aprovador_email:m.email, aprovador_nome:m.nome, decidido_em:new Date().toISOString() }).eq("id",id);
     if(error) throw error;
   }
+  async function addFeedback(pessoa, texto){
+    const m=me();
+    const { error } = await client.from("feedbacks").insert({ grupo_id:state.groupId, pessoa, texto, author_email:m.email, author_nome:m.nome });
+    if(error) throw error;
+  }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
 
   // Histórico de conversa (pessoal, por e-mail). Retenção 30 dias.
@@ -2607,7 +2632,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, del, addMensagem, loadMensagens };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
@@ -2865,9 +2890,10 @@ function updateDaySummary(){
 /* ---------- refresh central ---------- */
 function refreshGroupAndRender(){
   return SB.pull(state.groupId).then(()=>{
+    try{ refreshNameBase(); }catch(e){}
     updateDaySummary();
     if(active===1) renderTasksView();
-    if(active===2) renderFolgasView();
+    if(active===2) applyThirdView();
   });
 }
 let _rtTimer=null;
@@ -3032,7 +3058,7 @@ async function applyGroupSelection(){
   updateSbUI();
   updateDaySummary();
   if(active===1) renderTasksView();
-  if(active===2) renderFolgasView();
+  if(active===2) applyThirdView();
 }
 
 /* ---- Tela de escolha de grupo (primeiro login) ---- */
@@ -3118,7 +3144,7 @@ async function afterLogin(){
   if(state.groupId){ await SB.pull(state.groupId); SB.subscribe(state.groupId, onRealtime); }
   updateSbUI(); updateDaySummary();
   if(active===1) renderTasksView();
-  if(active===2) renderFolgasView();
+  if(active===2) applyThirdView();
 }
 
 async function sbBoot(){
@@ -3181,7 +3207,7 @@ async function sbBoot(){
   });
   if(outB) outB.addEventListener("click", async ()=>{
     await SB.signOut(); renderGroupBar(); syncPanels(); updateSbUI();
-    if(active===1) renderTasksView(); if(active===2) renderFolgasView();
+    if(active===1) renderTasksView(); if(active===2) applyThirdView();
     sysChat("Você saiu do grupo. Modo local ativo.");
   });
 })();
@@ -3246,9 +3272,96 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
       await SB.pull(state.groupId);
       renderMessages(); updateDaySummary();
       if(active===1) renderTasksView();
-      if(active===2) renderFolgasView();
+      if(active===2) applyThirdView();
     }catch(e){}
     busy=false;
+  });
+})();
+
+/* ================= 3ª aba: Folgas <-> Feedback ================= */
+function applyThirdView(){
+  const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView");
+  const lbl=document.getElementById("tab3Label");
+  const isFb = state.thirdView==="feedback";
+  if(fol) fol.style.display = isFb?"none":"";
+  if(fbk) fbk.style.display = isFb?"":"none";
+  if(lbl) lbl.textContent = isFb?"Feedback":"Folgas";
+  try{ if(isFb) renderFeedback(); else renderFolgasView(); }catch(e){}
+}
+function openThirdChooser(){
+  if(document.getElementById("thirdChooser")) return;
+  const shadeEl=document.createElement("div"); shadeEl.id="thirdChooser"; shadeEl.className="anot-shade";
+  shadeEl.style.alignItems="flex-start"; shadeEl.style.padding="90px 14px 0";
+  const pop=document.createElement("div"); pop.className="anot-pop"; pop.style.maxWidth="240px";
+  pop.innerHTML='<div class="anot-pop-title">Terceira aba</div>';
+  [["folgas","Folgas"],["feedback","Feedback"]].forEach(function(o){
+    const it=document.createElement("button"); it.className="anot-pop-item"; it.textContent=o[1];
+    it.addEventListener("click",()=>{ state.thirdView=o[0]; persist(); shadeEl.remove(); applyThirdView(); });
+    pop.appendChild(it);
+  });
+  shadeEl.appendChild(pop);
+  shadeEl.addEventListener("click",e=>{ if(e.target===shadeEl) shadeEl.remove(); });
+  document.body.appendChild(shadeEl);
+}
+(function(){
+  const t3=document.getElementById("tab3");
+  if(t3) t3.addEventListener("click",(e)=>{ if(active===2){ e.stopImmediatePropagation(); openThirdChooser(); } }, true);
+})();
+
+/* base de nomes compartilhada (folgas + feedback) p/ autocompletar */
+function refreshNameBase(){
+  const dl=document.getElementById("nameBase"); if(!dl) return;
+  const set=new Set();
+  (SB.gState.folgas||[]).forEach(f=> (Array.isArray(f.nomes)?f.nomes:[]).forEach(n=>{ if(n && n.trim()) set.add(n.trim()); }));
+  (SB.gState.feedbacks||[]).forEach(fb=>{ if(fb.pessoa && fb.pessoa.trim()) set.add(fb.pessoa.trim()); });
+  const names=[...set].sort((a,b)=>a.localeCompare(b));
+  dl.innerHTML=names.map(n=>`<option value="${escapeHtml(n)}"></option>`).join("");
+}
+
+/* render feedbacks da pessoa digitada */
+function renderFeedback(){
+  refreshNameBase();
+  const list=document.getElementById("feedbackList"); if(!list) return;
+  const nameEl=document.getElementById("fbNameInput");
+  const label=document.getElementById("fbPersonLabel");
+  const pessoa=((nameEl&&nameEl.value)||"").trim();
+  if(label) label.textContent = pessoa || "—";
+  if(!pessoa){ list.innerHTML=`<div class="empty">Digite um nome pra ver os feedbacks.</div>`; return; }
+  const rows=(SB.gState.feedbacks||[]).filter(f=>(f.pessoa||"").toLowerCase()===pessoa.toLowerCase());
+  if(!rows.length){ list.innerHTML=`<div class="empty">Sem feedbacks sobre "${escapeHtml(pessoa)}".</div>`; return; }
+  list.innerHTML=rows.map(f=>{
+    const del=isMine(f.author_email)?`<button class="fbdel" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;margin-left:4px;cursor:pointer">×</button>`:"";
+    const dt=f.created_at?formatPretty(String(f.created_at).slice(0,10)):"";
+    return `<div class="item"><div class="check" style="visibility:hidden"></div>
+      <div class="item-body" style="min-width:0">
+        <div style="word-break:break-word">${escapeHtml(f.texto||"")}${del}</div>
+        <div class="item-meta" style="margin-top:4px"><span>${escapeHtml(dt)}</span> · ${authChip(f.author_email)}</div>
+      </div></div>`;
+  }).join("");
+  list.querySelectorAll(".fbdel[data-id]").forEach(b=>{
+    let armed=false,tmr=null;
+    b.addEventListener("click",(ev)=>{ ev.stopPropagation();
+      if(!armed){ armed=true; b.textContent="Excluir?"; b.style.color="#fff"; b.style.background="#EF4444"; b.style.borderRadius="6px"; b.style.padding="1px 8px"; tmr=setTimeout(()=>{armed=false;b.textContent="×";b.style.background="none";b.style.padding="0 4px";b.style.color="#EF4444";},3000); return; }
+      clearTimeout(tmr);
+      SB.del("feedbacks",b.dataset.id).then(refreshGroupAndRender).then(()=>renderFeedback()).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+    });
+  });
+}
+/* inputs do feedback */
+(function(){
+  const nameEl=document.getElementById("fbNameInput");
+  const txtEl=document.getElementById("fbTextInput");
+  const addB=document.getElementById("fbAddBtn");
+  if(nameEl) nameEl.addEventListener("input", ()=>{ if(SB.groupMode()) renderFeedback(); });
+  if(addB) addB.addEventListener("click", ()=>{
+    if(!SB.groupMode()){ sysChat("Entre num grupo pra usar feedback."); return; }
+    const pessoa=((nameEl&&nameEl.value)||"").trim();
+    const texto=((txtEl&&txtEl.value)||"").trim();
+    if(!pessoa){ sysChat("Feedback: digite o nome da pessoa."); return; }
+    if(!texto){ sysChat("Feedback: escreva o texto."); return; }
+    SB.addFeedback(pessoa, texto).then(refreshGroupAndRender)
+      .then(()=>{ if(txtEl) txtEl.value=""; renderFeedback(); sysChat(`Feedback sobre ${pessoa} adicionado.`); })
+      .catch(e=>sysChat("Erro ao salvar feedback: "+sbErrMsg(e)));
   });
 })();
 
