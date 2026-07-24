@@ -658,6 +658,30 @@
           <div id="feedbackList"></div>
         </div>
 
+        <!-- Visão FÉRIAS -->
+        <div id="feriasView" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 10px;gap:8px">
+            <div style="font-weight:800;font-size:16px;text-transform:capitalize" id="feriasMonthLabel">—</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button class="nav" id="feriasPrev" aria-label="Mês anterior">‹</button>
+              <button class="nav" id="feriasNext" aria-label="Próximo mês">›</button>
+              <button id="feriasAdd" aria-label="Adicionar férias" style="width:34px;height:34px;border-radius:50%;border:0;background:var(--meli-blue);color:#fff;font:700 20px inherit;line-height:1;cursor:pointer">+</button>
+            </div>
+          </div>
+          <div id="feriasAddForm" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 4px 10px">
+            <input type="text" id="feriaNomeInput" list="nameBase" placeholder="Nome" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;font:14px inherit;margin-bottom:6px">
+            <div style="display:flex;gap:6px;margin-bottom:6px">
+              <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Início</label><input type="date" id="feriaInicioInput" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
+              <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Fim</label><input type="date" id="feriaFimInput" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="feriaSaveBtn" style="flex:1;background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px;font:700 13px inherit">Adicionar</button>
+              <button id="feriaCancelBtn" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:9px 14px;font:700 13px inherit">Cancelar</button>
+            </div>
+          </div>
+          <div id="feriasList"></div>
+        </div>
+
         <!-- Visão NOMES DA EQUIPE -->
         <div id="nomesView" style="display:none">
           <div class="section-h">Nomes da equipe</div>
@@ -2480,7 +2504,7 @@ const GROUP_TREE = {
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2571,6 +2595,11 @@ const SB = (function(){
     gState.tarefas   = (t&&t.data)?t.data:[];
     gState.folgas    = (f&&f.data)?f.data:[];
     gState.feedbacks = (fb&&fb.data)?fb.data:[];
+    // férias (best-effort; ignora se a tabela ainda não existe)
+    try{
+      const fe = await client.from("ferias").select("*").eq("grupo_id",gid).order("inicio",{ascending:true});
+      gState.ferias = (fe&&fe.data)?fe.data:[];
+    }catch(e){ gState.ferias = gState.ferias||[]; }
     // dicionário de nomes (best-effort; ignora se a tabela ainda não existe)
     try{
       const nn = await client.from("nomes").select("nome").eq("grupo_id",gid);
@@ -2592,6 +2621,7 @@ const SB = (function(){
         .on("postgres_changes",{event:"*",schema:"public",table:"folgas",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"feedbacks",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"nomes",filter:"grupo_id=eq."+gid}, onChange)
+        .on("postgres_changes",{event:"*",schema:"public",table:"ferias",filter:"grupo_id=eq."+gid}, onChange)
         .on("postgres_changes",{event:"*",schema:"public",table:"perfis"}, onChange)
         .subscribe();
     }catch(e){}
@@ -2635,6 +2665,12 @@ const SB = (function(){
     if(error) throw error;
     addNome(pessoa); // registra o nome no dicionário
   }
+  async function addFeria(nome, inicio, fim){
+    const m=me();
+    const { error } = await client.from("ferias").insert({ grupo_id:state.groupId, nome, inicio, fim, author_email:m.email, author_nome:m.nome });
+    if(error) throw error;
+    addNome(nome);
+  }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
   async function renameNome(oldN, newN){
     const { error } = await client.rpc("rename_nome", { p_grupo:state.groupId, p_old:oldN, p_new:newN });
@@ -2663,7 +2699,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addNome, renameNome, deleteNome, del, addMensagem, loadMensagens };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
@@ -3313,14 +3349,15 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
 /* ================= 3ª aba: Folgas <-> Feedback ================= */
 function applyThirdView(){
   try{ refreshNameBase(); }catch(e){}   // popula sugestões nas visões
-  const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView"), nm=document.getElementById("nomesView");
+  const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView"), nm=document.getElementById("nomesView"), fer=document.getElementById("feriasView");
   const lbl=document.getElementById("tab3Label");
   const v = state.thirdView;
   if(fol) fol.style.display = (v==="folgas")?"":"none";
   if(fbk) fbk.style.display = (v==="feedback")?"":"none";
   if(nm)  nm.style.display  = (v==="nomes")?"":"none";
-  if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Nomes":"Folgas");
-  try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderNomes(); else renderFolgasView(); }catch(e){}
+  if(fer) fer.style.display = (v==="ferias")?"":"none";
+  if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Nomes":(v==="ferias"?"Férias":"Folgas"));
+  try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderNomes(); else if(v==="ferias") renderFerias(); else renderFolgasView(); }catch(e){}
 }
 function openThirdChooser(){
   if(document.getElementById("thirdChooser")) return;
@@ -3328,7 +3365,7 @@ function openThirdChooser(){
   shadeEl.style.alignItems="flex-start"; shadeEl.style.padding="90px 14px 0";
   const pop=document.createElement("div"); pop.className="anot-pop"; pop.style.maxWidth="240px";
   pop.innerHTML='<div class="anot-pop-title">Terceira aba</div>';
-  [["folgas","Folgas"],["feedback","Feedback"],["nomes","Nomes da equipe"]].forEach(function(o){
+  [["folgas","Folgas"],["ferias","Férias"],["feedback","Feedback"],["nomes","Nomes da equipe"]].forEach(function(o){
     const it=document.createElement("button"); it.className="anot-pop-item"; it.textContent=o[1];
     it.addEventListener("click",()=>{ state.thirdView=o[0]; persist(); shadeEl.remove(); applyThirdView(); });
     pop.appendChild(it);
@@ -3485,6 +3522,84 @@ function renderFeedback(){
     SB.addFeedback(pessoa, texto).then(refreshGroupAndRender)
       .then(()=>{ if(txtEl) txtEl.value=""; if(nameEl) nameEl.value=""; renderFeedback(); if(nameEl) nameEl.focus(); sysChat(`Feedback sobre ${pessoa} adicionado.`); })
       .catch(e=>sysChat("Erro ao salvar feedback: "+sbErrMsg(e)));
+  });
+})();
+
+/* ================= Férias (controle mensal) ================= */
+let feriasCursor = (function(){ const d=new Date(); return {y:d.getFullYear(), m:d.getMonth()}; })(); // m: 0-11
+const MESES_PT=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+function pad2n(n){ return (n<10?"0":"")+n; }
+function ddmm(dstr){ const p=String(dstr||"").split("-"); return p.length===3 ? (p[2]+"."+p[1]) : dstr; }
+function daysBetween(a,b){ const d1=new Date(a+"T00:00:00"), d2=new Date(b+"T00:00:00"); return Math.round((d2-d1)/86400000)+1; }
+function renderFerias(){
+  const lbl=document.getElementById("feriasMonthLabel");
+  const list=document.getElementById("feriasList");
+  if(!list) return;
+  const y=feriasCursor.y, m=feriasCursor.m;
+  if(lbl) lbl.textContent = MESES_PT[m]+" "+y;
+  const monthStart=`${y}-${pad2n(m+1)}-01`;
+  const lastDay=new Date(y, m+1, 0).getDate();
+  const monthEnd=`${y}-${pad2n(m+1)}-${pad2n(lastDay)}`;
+  // férias que cruzam o mês (inicio<=fimMes E fim>=inicioMes)
+  const rows=(SB.gState.ferias||[]).filter(f=> (f.inicio||"")<=monthEnd && (f.fim||"")>=monthStart )
+    .sort((a,b)=>(a.inicio||"").localeCompare(b.inicio||""));
+  if(!rows.length){ list.innerHTML=`<div class="empty">Sem férias em ${MESES_PT[m]} de ${y}.</div>`; return; }
+  list.innerHTML=rows.map(f=>{
+    const dur=daysBetween(f.inicio,f.fim);
+    // barra: posição relativa dentro do mês
+    const s=new Date(Math.max(new Date(f.inicio+"T00:00:00"), new Date(monthStart+"T00:00:00")));
+    const e=new Date(Math.min(new Date(f.fim+"T00:00:00"), new Date(monthEnd+"T00:00:00")));
+    const startDay=s.getDate(), endDay=e.getDate();
+    const leftPct=((startDay-1)/lastDay)*100, widPct=((endDay-startDay+1)/lastDay)*100;
+    const mine=isMine(f.author_email);
+    const del=mine?`<button class="fer-del" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
+    return `<div class="item" style="align-items:flex-start">
+      <div class="check" style="visibility:hidden"></div>
+      <div class="item-body" style="min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div class="item-title" style="min-width:0">${escapeHtml(f.nome)}${del}</div>
+          <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <div style="flex:1;height:6px;background:#E5E7EB;border-radius:6px;position:relative;min-width:0">
+            <div style="position:absolute;top:0;bottom:0;left:${leftPct}%;width:${widPct}%;background:var(--meli-blue);border-radius:6px"></div>
+          </div>
+          <span style="flex-shrink:0;font-size:11px;color:var(--ink-2)">${dur} dia${dur>1?"s":""}</span>
+        </div>
+      </div></div>`;
+  }).join("");
+  list.querySelectorAll(".fer-del[data-id]").forEach(b=>{
+    let armed=false,tmr=null;
+    b.addEventListener("click",(ev)=>{ ev.stopPropagation();
+      if(!armed){ armed=true; b.textContent="Excluir?"; b.style.color="#fff"; b.style.background="#EF4444"; b.style.borderRadius="6px"; b.style.padding="1px 8px"; tmr=setTimeout(()=>{armed=false;b.textContent="×";b.style.background="none";b.style.padding="0 4px";b.style.color="#EF4444";},3000); return; }
+      clearTimeout(tmr);
+      SB.del("ferias",b.dataset.id).then(refreshGroupAndRender).then(()=>renderFerias()).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+    });
+  });
+}
+(function(){
+  const prev=document.getElementById("feriasPrev"), next=document.getElementById("feriasNext");
+  const addB=document.getElementById("feriasAdd"), form=document.getElementById("feriasAddForm");
+  const saveB=document.getElementById("feriaSaveBtn"), cancelB=document.getElementById("feriaCancelBtn");
+  if(prev) prev.addEventListener("click",()=>{ feriasCursor.m--; if(feriasCursor.m<0){feriasCursor.m=11;feriasCursor.y--;} renderFerias(); });
+  if(next) next.addEventListener("click",()=>{ feriasCursor.m++; if(feriasCursor.m>11){feriasCursor.m=0;feriasCursor.y++;} renderFerias(); });
+  if(addB) addB.addEventListener("click",()=>{ if(form) form.style.display = form.style.display==="none"?"":"none"; refreshNameBase(); });
+  if(cancelB) cancelB.addEventListener("click",()=>{ if(form) form.style.display="none"; });
+  if(saveB) saveB.addEventListener("click",()=>{
+    if(!SB.groupMode()){ sysChat("Entre num grupo pra lançar férias."); return; }
+    const nome=(document.getElementById("feriaNomeInput").value||"").trim();
+    const ini=document.getElementById("feriaInicioInput").value||"";
+    const fim=document.getElementById("feriaFimInput").value||"";
+    if(!nome){ sysChat("Férias: digite o nome."); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ini)||!/^\d{4}-\d{2}-\d{2}$/.test(fim)){ sysChat("Férias: escolha início e fim."); return; }
+    if(fim<ini){ sysChat("Férias: fim antes do início."); return; }
+    SB.addFeria(nome, ini, fim).then(refreshGroupAndRender).then(()=>{
+      document.getElementById("feriaNomeInput").value=""; document.getElementById("feriaInicioInput").value=""; document.getElementById("feriaFimInput").value="";
+      if(form) form.style.display="none";
+      // pula pro mês do início lançado
+      const p=ini.split("-"); feriasCursor={y:+p[0], m:(+p[1])-1};
+      renderFerias(); sysChat(`Férias de ${nome} (${ddmm(ini)}–${ddmm(fim)}) lançadas.`);
+    }).catch(e=>sysChat("Erro ao lançar férias: "+sbErrMsg(e)));
   });
 })();
 
