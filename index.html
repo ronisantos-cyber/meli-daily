@@ -2954,11 +2954,25 @@ function updateDaySummary(){
   card.innerHTML=h;
 }
 
+/* badge vermelho no robô = folgas pendentes de aprovação */
+function updatePendingBadge(){
+  const av=document.querySelector(".header .avatar"); if(!av) return;
+  let dot=document.getElementById("pendingDot");
+  const pend = SB.groupMode() ? (SB.gState.folgas||[]).filter(f=>(f.status||"pendente")==="pendente").length : 0;
+  if(pend>0){
+    av.style.position="relative";
+    if(!dot){ dot=document.createElement("span"); dot.id="pendingDot"; av.appendChild(dot); }
+    dot.style.cssText="position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;background:#EF4444;color:#fff;border:2px solid var(--meli-yellow);border-radius:999px;font:700 10px/13px -apple-system,sans-serif;display:flex;align-items:center;justify-content:center;z-index:6";
+    dot.textContent = pend>9?"9+":String(pend);
+  } else if(dot){ dot.remove(); }
+}
+
 /* ---------- refresh central ---------- */
 function refreshGroupAndRender(){
   return SB.pull(state.groupId).then(()=>{
     try{ refreshNameBase(); }catch(e){}
     updateDaySummary();
+    try{ updatePendingBadge(); }catch(e){}
     if(active===1) renderTasksView();
     if(active===2) applyThirdView();
   });
@@ -3210,6 +3224,7 @@ async function afterLogin(){
   if(my) my.value = nameFor(state.session.email);
   if(state.groupId){ await SB.pull(state.groupId); SB.subscribe(state.groupId, onRealtime); }
   try{ refreshNameBase(); }catch(e){}   // base de nomes pronta já no login
+  try{ updatePendingBadge(); }catch(e){}
   updateSbUI(); updateDaySummary();
   if(active===1) renderTasksView();
   if(active===2) applyThirdView();
