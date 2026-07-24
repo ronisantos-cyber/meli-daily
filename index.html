@@ -159,6 +159,7 @@
     box-shadow:0 1px 1px rgba(0,0,0,.08);
     word-wrap:break-word;
   }
+  .bubble .btext{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
   .bubble.ai{background:var(--bubble-ai);border-top-left-radius:0}
   .bubble.me{background:var(--bubble-me);border-top-right-radius:0}
   .bubble .time{
@@ -1125,7 +1126,7 @@ function renderMessages(){
     if(m.kind === "system"){
       const row = document.createElement("div");
       row.className="bubble-row center";
-      row.innerHTML = `<div class="bubble system">${escapeHtml(m.text)}</div>`;
+      row.innerHTML = `<div class="bubble system"><span class="btext">${escapeHtml(m.text)}</span></div>`;
       messagesEl.appendChild(row);
       continue;
     }
@@ -1139,11 +1140,7 @@ function renderMessages(){
     const row = document.createElement("div");
     row.className = "bubble-row " + (m.who==="me"?"me":"");
     const time = fmtTime(new Date(m.t));
-    row.innerHTML = `
-      <div class="bubble ${m.who==="me"?"me":"ai"}">
-        ${linkify(escapeHtml(m.text))}
-        <span class="time">${time}</span>
-      </div>`;
+    row.innerHTML = `<div class="bubble ${m.who==="me"?"me":"ai"}"><span class="btext">${linkify(escapeHtml(m.text))}</span><span class="time">${time}</span></div>`;
     messagesEl.appendChild(row);
   }
   messagesEl.parentElement.scrollTop = messagesEl.parentElement.scrollHeight;
@@ -2801,16 +2798,27 @@ function renderGroupNotes(){
   }else{
     const byTitle={};
     notes.forEach(n=>{ const k=(n.titulo||"").toUpperCase(); (byTitle[k]=byTitle[k]||[]).push(n); });
+    const entryMeta = n => {
+      const del = isMine(n.author_email) ? `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 2px;cursor:pointer">×</button>` : "";
+      return `<span style="display:inline-flex;align-items:center;gap:2px;flex-shrink:0">${authChip(n.author_email)}${del}</span>`;
+    };
     Object.keys(byTitle).sort().forEach(title=>{
       const entries=byTitle[title];
-      const lines=entries.map(n=>{
-        const del = isMine(n.author_email) ? `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>` : "";
-        return `<li style="margin:3px 0"><span style="white-space:pre-wrap;word-break:break-word">${escapeHtml(n.conteudo||"")}</span> — ${authChip(n.author_email)}${del}</li>`;
+      const single = entries.length===1;
+      const inner = entries.map(n=>{
+        const meta = single ? "" : `<div style="flex-shrink:0">${entryMeta(n)}</div>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:4px 0">
+          <div style="min-width:0;white-space:pre-wrap;word-break:break-word;font-size:13px;color:var(--ink-2);line-height:1.45">${escapeHtml(n.conteudo||"")}</div>
+          ${meta}
+        </div>`;
       }).join("");
       html += `<div class="item"><div class="check" style="visibility:hidden"></div>
         <div class="item-body" style="min-width:0">
-          <div class="item-title">${escapeHtml(title)} <span style="font-weight:500;color:var(--ink-2)">· ${entries.length}</span></div>
-          <ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--ink-2);line-height:1.45">${lines}</ul>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div class="item-title">${escapeHtml(title)} <span style="font-weight:500;color:var(--ink-2)">· ${entries.length}</span></div>
+            ${single?`<div style="flex-shrink:0">${entryMeta(entries[0])}</div>`:""}
+          </div>
+          <div style="margin-top:6px">${inner}</div>
         </div></div>`;
     });
   }
