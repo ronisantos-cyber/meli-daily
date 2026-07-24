@@ -633,26 +633,13 @@
         Em produção, o app pede só o escopo mínimo (<code>calendar.events</code> e <code>gmail.readonly</code> por padrão). <code>gmail.send</code> só é solicitado quando você usa pela primeira vez a ação "enviar email". Tokens nunca ficam no celular — ficam num backend Meli, criptografados, e o app usa um token de sessão curto.
       </div>
 
-      <h3>Grupos compartilhados (Supabase)</h3>
-      <div class="info" style="background:#DBEAFE;border-color:#93C5FD;color:#1E3A8A">
-O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</strong> (entra direto). Anotações e folgas ficam compartilhadas por grupo. Estes campos só servem se você quiser apontar pra outro projeto Supabase.
-      </div>
-      <div class="edit-fields" style="padding:6px 0 4px">
-        <label>Project URL</label>
-        <input type="url" id="sbUrlInput" placeholder="https://xxxx.supabase.co" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <label>Anon public key</label>
-        <input type="password" id="sbKeyInput" placeholder="eyJhbGciOi..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-      </div>
-      <div style="display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap">
-        <button class="conn-btn connect" id="sbSave">Salvar e conectar</button>
-        <button class="conn-btn" id="sbLogout" style="background:#FEE2E2;color:#991B1B">Sair</button>
-      </div>
-      <div class="row-set">
-        <div>
-          <div class="label">Status</div>
-          <div class="desc" id="sbStatus">local (sem grupo)</div>
-        </div>
-        <span class="pill" id="sbBadge">local</span>
+      <!-- bloco Supabase oculto (app pré-configurado); mantido só p/ refs de JS -->
+      <div style="display:none">
+        <input type="url" id="sbUrlInput">
+        <input type="password" id="sbKeyInput">
+        <button id="sbSave">Salvar</button>
+        <div id="sbStatus"></div>
+        <span id="sbBadge"></span>
       </div>
 
       <!-- Grupo (setor/área/turno) + nomes — só aparece logado -->
@@ -682,8 +669,14 @@ O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</
           <button class="conn-btn connect" id="myNameSave">Salvar meu nome</button>
         </div>
         <div id="profilesList" style="margin-top:6px"></div>
+
+        <h3>Conta</h3>
+        <div style="display:flex;gap:8px;margin:8px 0 4px">
+          <button class="conn-btn" id="sbLogout" style="background:#FEE2E2;color:#991B1B">Sair da conta</button>
+        </div>
       </div>
 
+      <div style="display:none">
       <h3>IA direta (modo dev)</h3>
       <div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F">
         <strong>⚠️ Apenas pra testes locais.</strong> A API key fica em <code>localStorage</code> sem Keystore. Use só se o BFF não estiver disponível. Se o BFF estiver configurado e logado, o chat usa o BFF e ignora estas chaves.
@@ -711,6 +704,7 @@ O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</
         </div>
         <span class="pill" id="aiUsageBadge">0/50</span>
       </div>
+      </div>
 
       <h3>Notificações</h3>
       <div class="row-set">
@@ -721,6 +715,7 @@ O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</
         <span class="pill">on</span>
       </div>
 
+      <div style="display:none">
       <h3>Privacidade</h3>
       <div class="row-set">
         <div>
@@ -728,6 +723,7 @@ O app já vem pré-configurado. Login só com e-mail <strong>@mercadolivre.com</
           <div class="desc">Tarefas, conversa e cache</div>
         </div>
         <button class="conn-btn" id="wipeBtn" style="background:#FEE2E2;color:#991B1B">Apagar</button>
+      </div>
       </div>
     </div>
   </div>
@@ -806,9 +802,7 @@ function cryptoId(){
 }
 
 const seed = () => ({
-  messages: [
-    {who:"ai", text:"Boa! Eu sou seu assistente diário.\n\nComandos por chat:\n• \"Tarefa: <título>\" / \"lembrar de X\" / \"me lembre X\" — cria tarefa.\n• \"Anote <TÍTULO> <conteúdo>\" — cria/acumula anotação. Primeira palavra é o título; o resto, o conteúdo. Multi-palavra com \":\".\n• \"Excluir <título>\" / \"apagar X\" / \"deletar X\" / \"remove X\" — apaga nota/tarefa/evento.\n• \"Adiar X pra amanhã\" / \"adia X pra Y\".\n• \"Resumo do dia\", \"agenda de hoje\".\n\nNa aba Tarefas: toque curto edita o item; toque longo abre o menu (editar / mover data / mover ordem / apagar).", t:Date.now()-1000*60*60*2}
-  ],
+  messages: [],
   tasks: [
     {id:cryptoId(), title:"Revisar PR do Daily Assistant", date:todayKey(), time:"16:00", done:false, source:"chat"},
     {id:cryptoId(), title:"Mandar resumo de OKRs pro time", date:todayKey(), time:"11:30", done:true, source:"chat"}
@@ -836,6 +830,8 @@ const seed = () => ({
 function migrate(s){
   if(!s || typeof s !== "object") return seed();
   if(!Array.isArray(s.messages)) s.messages = [];
+  // v0.3.1 — remove a mensagem de apresentação/ajuda antiga
+  s.messages = s.messages.filter(m => !(m && typeof m.text === "string" && m.text.indexOf("Eu sou seu assistente diário") !== -1));
   if(!Array.isArray(s.tasks)) s.tasks = [];
   if(!Array.isArray(s.events)) s.events = [];
   if(!s.conn || typeof s.conn !== "object") s.conn = {cal:false,gmail:false};
@@ -2496,13 +2492,32 @@ const SB = (function(){
   }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
 
+  // Histórico de conversa (pessoal, por e-mail). Retenção 30 dias.
+  async function addMensagem(texto, tipo){
+    if(!client || !state.session) return;
+    try{ await client.from("mensagens").insert({ author_email:state.session.email, texto, tipo, grupo_id:state.groupId||null }); }catch(e){}
+  }
+  async function loadMensagens(){
+    if(!client || !state.session) return [];
+    const cutoff=new Date(Date.now()-30*24*60*60*1000).toISOString();
+    // apaga as minhas com mais de 30 dias (retenção)
+    try{ await client.from("mensagens").delete().eq("author_email",state.session.email).lt("created_at",cutoff); }catch(e){}
+    const { data, error } = await client.from("mensagens").select("*")
+      .eq("author_email",state.session.email).gte("created_at",cutoff).order("created_at",{ascending:true});
+    if(error || !data) return [];
+    return data;
+  }
+
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, del };
+    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, del, addMensagem, loadMensagens };
 })();
 
 /* ---------- helpers ---------- */
-function sysChat(text){ state.messages.push({kind:"system", text, t:Date.now()}); persist(); renderMessages(); }
+function sysChat(text){
+  state.messages.push({kind:"system", text, t:Date.now()}); persist(); renderMessages();
+  try{ if(SB.groupMode()) SB.addMensagem(text, "sys"); }catch(e){}
+}
 function sbErrMsg(e){ return (e && (e.message||e.error_description||e.msg)) || "erro"; }
 function nameFor(email){
   if(!email) return "";
@@ -2730,7 +2745,7 @@ function updateDaySummary(){
   const tasks=SB.gState.tarefas.filter(t=>t.data===day);
   const folgas=SB.gState.folgas.filter(f=>f.data===day);
   const titulos=[...new Set(notes.map(n=>(n.titulo||"").toUpperCase()))];
-  let h=`<div style="font-weight:800;font-size:14px;margin-bottom:6px">Resumo de hoje · ${escapeHtml(state.groupLabel||"")}</div>`;
+  let h=`<div style="font-weight:800;font-size:14px;margin-bottom:6px">Resumo de hoje</div>`;
   h+=`<div style="font-size:13px;color:var(--ink-2);line-height:1.5">`;
   h+=`<b>Folgas:</b> ${folgas.length?folgas.map(f=>escapeHtml((Array.isArray(f.nomes)?f.nomes.join(", "):"")||"—")+" ("+escapeHtml(f.status||"pendente")+")").join("; "):"nenhuma"}<br>`;
   h+=`<b>Tarefas:</b> ${tasks.length?tasks.map(t=>escapeHtml(t.titulo)+(t.concluida?" ✓":"")).join("; "):"nenhuma"}<br>`;
@@ -2788,7 +2803,12 @@ function handleGroupCommand(trimmed){
 /* ---------- wrappers ---------- */
 const _handleAI=handleAI;
 handleAI=function(text){
-  if(SB.groupMode()){ const t=cleanInput(text); if(handleGroupCommand(t)) return; }
+  if(SB.groupMode()){
+    const t=cleanInput(text);
+    SB.addMensagem(t, "me");            // salva no histórico online (30 dias)
+    handleGroupCommand(t);              // se não for comando, não responde nada
+    return;                             // nunca cai no "Não reconheci" em grupo
+  }
   return _handleAI(text);
 };
 const _renderMessages=renderMessages;
@@ -2807,15 +2827,10 @@ function addFolgaGroup(){
     .catch(e=>sysChat("Erro ao salvar folga: "+sbErrMsg(e)));
 }
 
-/* ---------- barra de grupo (rótulo, toca p/ config) ---------- */
+/* ---------- barra de grupo: sempre oculta (troca só nas configurações) ---------- */
 function renderGroupBar(){
   const bar=document.getElementById("groupBar"); if(!bar) return;
-  if(!SB.groupMode()){ bar.style.display="none"; return; }
-  bar.style.display="flex"; bar.style.cursor="pointer";
-  bar.innerHTML=`<span class="group-bar-icon">👥</span>
-    <span style="flex:1;min-width:0;font-weight:700;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(state.groupLabel||"—")}</span>
-    <span style="font-size:11px;color:var(--ink-2)">trocar ⚙️</span>`;
-  bar.onclick=()=>{ if(shade) shade.classList.add("open"); const box=document.getElementById("sbGroupBox"); if(box) box.scrollIntoView({behavior:"smooth",block:"start"}); };
+  bar.style.display="none";
 }
 
 /* ---------- login overlay ---------- */
@@ -2880,9 +2895,11 @@ async function applyGroupSelection(){
 /* lista de perfis (nomes editáveis) */
 function renderProfilesList(){
   const box=document.getElementById("profilesList"); if(!box) return;
-  const entries=Object.keys(state.profiles||{}).sort();
-  if(!entries.length){ box.innerHTML=`<div class="desc" style="padding:4px">Nenhum nome cadastrado ainda.</div>`; return; }
-  box.innerHTML=entries.map(em=>`
+  const myEmail=(state.session && state.session.email||"").toLowerCase();
+  // exclui o próprio e-mail (já editável em "Seu nome") pra não duplicar
+  const entries=Object.keys(state.profiles||{}).filter(e=>e!==myEmail).sort();
+  if(!entries.length){ box.innerHTML=`<div class="desc" style="padding:4px 0">Nenhum outro nome cadastrado ainda.</div>`; return; }
+  box.innerHTML = `<div class="subcat-h" style="margin:10px 4px 6px">Outros nomes</div>` + entries.map(em=>`
     <div style="display:flex;gap:6px;align-items:center;margin:5px 0">
       <input type="text" data-email="${escapeHtml(em)}" value="${escapeHtml(state.profiles[em]||"")}" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:13px inherit">
       <button class="pf-save" data-email="${escapeHtml(em)}" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 10px;font:700 12px inherit">OK</button>
@@ -2904,6 +2921,14 @@ async function afterLogin(){
   await SB.loadGroups();
   await SB.loadProfiles();
   await SB.ensureOwnProfile();
+  // histórico de conversa online (últimos 30 dias) vira a Conversa
+  try{
+    const msgs = await SB.loadMensagens();
+    state.messages = msgs.map(m => m.tipo==="me"
+      ? { who:"me", text:m.texto, t:Date.parse(m.created_at)||Date.now() }
+      : { kind:"system", text:m.texto, t:Date.parse(m.created_at)||Date.now() });
+    persist(); renderMessages();
+  }catch(e){}
   if(!state.groupId && state.groups[0]){ state.groupId=state.groups[0].id; state.groupLabel=state.groups[0].label; persist(); }
   populateSelectors();
   renderProfilesList();
