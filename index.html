@@ -598,7 +598,7 @@
        depender de posicionamento absoluto — some/aparece só trocando display. -->
   <div class="bottom-stack" id="bottomStack">
     <div class="quick" id="quickReplies">
-      <button data-prefill="Anotar: ">🗒️ Anotação</button>
+      <button id="btnAnotacao" data-prefill="Anotar: ">🗒️ Anotação</button>
       <button data-prefill="Tarefa: ">✓ Tarefa</button>
       <button data-q="Resumo do dia">📊 Resumo Dia</button>
     </div>
@@ -2848,7 +2848,30 @@ function handleGroupCommand(trimmed){
       .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
     return true;
   }
+  // resumo do dia (grupo)
+  if(/^(resumo|resume|resumo do dia|resumo dia)\b/i.test(trimmed)){
+    sysChat(buildGroupSummaryText(selDay()));
+    return true;
+  }
   return false;
+}
+
+// Resumo em texto do dia selecionado, com dados do grupo.
+function buildGroupSummaryText(day){
+  const notes=SB.gState.anotacoes.filter(n=>n.dia===day);
+  const tasks=SB.gState.tarefas.filter(t=>t.data===day);
+  const folgas=SB.gState.folgas.filter(f=>f.data===day);
+  const byTitle={};
+  notes.forEach(n=>{ const k=(n.titulo||"").toUpperCase(); (byTitle[k]=byTitle[k]||[]).push(n); });
+  let out=`📊 Resumo de ${formatPretty(day)}\n\n`;
+  out+=`Anotações:\n`;
+  const titles=Object.keys(byTitle).sort();
+  out += titles.length ? titles.map(t=>`• ${t} (${byTitle[t].length})`).join("\n") : "• nenhuma";
+  out+=`\n\nTarefas:\n`;
+  out += tasks.length ? tasks.map(t=>`• ${t.titulo}${t.concluida?" ✓":""}`).join("\n") : "• nenhuma";
+  out+=`\n\nFolgas:\n`;
+  out += folgas.length ? folgas.map(f=>`• ${(Array.isArray(f.nomes)?f.nomes.join(", "):"")||"—"} (${f.status||"pendente"})`).join("\n") : "• nenhuma";
+  return out;
 }
 
 /* ---------- wrappers ---------- */
@@ -3061,6 +3084,46 @@ async function sbBoot(){
 
 /* mudança de dia (grupo) — o listener original chama a versão local */
 if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && active===1) renderGroupNotes(); });
+
+/* long-press no botão "Anotação" -> menu de títulos */
+(function(){
+  const btn=document.getElementById("btnAnotacao"); if(!btn) return;
+  const TITLES=["AT","ABS","Setup_Time","Meal_Accuracy","NET","SLA"];
+  let timer=null, longFired=false;
+  function close(){ const s=document.getElementById("anotMenuShade"); if(s) s.remove(); }
+  function pick(t){
+    close();
+    input.value="Anotar: "+t+" ";
+    input.focus();
+    try{ input.setSelectionRange(input.value.length,input.value.length); }catch(_){}
+    input.style.height="auto"; input.style.height=Math.min(120,input.scrollHeight)+"px";
+  }
+  function openMenu(){
+    longFired=true;
+    if(document.getElementById("anotMenuShade")) return;
+    const shadeEl=document.createElement("div");
+    shadeEl.id="anotMenuShade";
+    shadeEl.style.cssText="position:fixed;inset:0;z-index:180;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center";
+    const sheet=document.createElement("div");
+    sheet.style.cssText="background:#fff;width:100%;max-width:420px;border-radius:16px 16px 0 0;padding:10px 8px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -6px 24px rgba(0,0,0,.2)";
+    sheet.innerHTML='<div style="text-align:center;font-weight:800;font-size:14px;color:var(--ink);padding:8px 0 6px">Título da anotação</div>';
+    TITLES.forEach(t=>{
+      const it=document.createElement("button");
+      it.textContent=t;
+      it.style.cssText="display:block;width:100%;text-align:left;border:0;background:none;padding:13px 16px;font:600 15px inherit;color:var(--ink);border-top:1px solid var(--line);cursor:pointer";
+      it.addEventListener("click",()=>pick(t));
+      sheet.appendChild(it);
+    });
+    shadeEl.appendChild(sheet);
+    shadeEl.addEventListener("click",e=>{ if(e.target===shadeEl) close(); });
+    document.body.appendChild(shadeEl);
+  }
+  btn.addEventListener("touchstart",()=>{ longFired=false; timer=setTimeout(openMenu,600); },{passive:true});
+  btn.addEventListener("touchend",()=>{ clearTimeout(timer); });
+  btn.addEventListener("touchmove",()=>{ clearTimeout(timer); });
+  btn.addEventListener("contextmenu",e=>{ e.preventDefault(); openMenu(); });
+  btn.addEventListener("click",e=>{ if(longFired){ e.preventDefault(); e.stopImmediatePropagation(); longFired=false; } }, true);
+})();
 
 /* BOOT */
 sbBoot();
