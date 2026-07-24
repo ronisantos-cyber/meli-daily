@@ -131,16 +131,16 @@
       radial-gradient(rgba(0,0,0,.025) 1px,transparent 1px);
     background-size:18px 18px,28px 28px;
     background-position:0 0,9px 14px;
-    padding:12px 10px 120px;    /* espaço extra pra bottom-stack flutuante */
+    padding:12px 10px;
     overflow-x:hidden;
   }
-  /* Stack flutuante fixo no rodapé (fora de .pages pra não herdar
-     transform-containing-block). Background transparente — messages passam por trás. */
+  /* Rodapé do device: filho flex normal (não absoluto) — sempre visível,
+     empurra as mensagens pra cima em vez de flutuar por cima. */
   .bottom-stack{
-    position:absolute;left:0;right:0;bottom:0;
-    background:transparent;
-    z-index:5;
-    pointer-events:none;
+    flex-shrink:0;
+    background:var(--chat-bg);
+    border-top:1px solid rgba(0,0,0,.06);
+    padding-bottom:env(safe-area-inset-bottom);
   }
   .day-sep{
     text-align:center;margin:10px auto 14px;
@@ -193,7 +193,6 @@
   .composer{
     position:relative;
     background:transparent;padding:4px 10px 8px;display:flex;gap:8px;align-items:flex-end;
-    pointer-events:none;
   }
   .composer-inner{
     flex:1 1 0;min-width:0;display:flex;align-items:center;
@@ -419,7 +418,6 @@
   }
   .quick{
     display:flex;gap:6px;padding:4px 10px 0;overflow-x:auto;scrollbar-width:none;
-    pointer-events:none;
   }
   .quick::-webkit-scrollbar{display:none}
   .quick button{
@@ -594,23 +592,23 @@
 
     </div>
 
-    <!-- Bottom stack: fora de .pages pra não herdar transform-containing-block
-         (que dobrava a largura). Ancorado em .body (position:relative).
-         Background transparente — flutua sobre as mensagens que rolam atrás. -->
-    <div class="bottom-stack" id="bottomStack">
-      <div class="quick" id="quickReplies">
-        <button data-prefill="Anotar: ">🗒️ Anotação</button>
-        <button data-prefill="Tarefa: ">✓ Tarefa</button>
-        <button data-q="Resumo do dia">📊 Resumo Dia</button>
+  </div><!-- /.body -->
+
+  <!-- Rodapé do device (layout flex, sempre visível). Fora do .body pra não
+       depender de posicionamento absoluto — some/aparece só trocando display. -->
+  <div class="bottom-stack" id="bottomStack">
+    <div class="quick" id="quickReplies">
+      <button data-prefill="Anotar: ">🗒️ Anotação</button>
+      <button data-prefill="Tarefa: ">✓ Tarefa</button>
+      <button data-q="Resumo do dia">📊 Resumo Dia</button>
+    </div>
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea id="input" rows="1" placeholder="Mensagem"></textarea>
       </div>
-      <div class="composer">
-        <div class="composer-inner">
-          <textarea id="input" rows="1" placeholder="Mensagem"></textarea>
-        </div>
-        <button class="send-btn" id="send" aria-label="Enviar">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 11.5L21 3l-8.5 18-2-7.5z"/></svg>
-        </button>
-      </div>
+      <button class="send-btn" id="send" aria-label="Enviar">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 11.5L21 3l-8.5 18-2-7.5z"/></svg>
+      </button>
     </div>
   </div>
 
