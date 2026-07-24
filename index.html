@@ -3142,6 +3142,7 @@ async function afterLogin(){
   const my=document.getElementById("myNameInput");
   if(my) my.value = nameFor(state.session.email);
   if(state.groupId){ await SB.pull(state.groupId); SB.subscribe(state.groupId, onRealtime); }
+  try{ refreshNameBase(); }catch(e){}   // base de nomes pronta já no login
   updateSbUI(); updateDaySummary();
   if(active===1) renderTasksView();
   if(active===2) applyThirdView();
@@ -3280,6 +3281,7 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
 
 /* ================= 3ª aba: Folgas <-> Feedback ================= */
 function applyThirdView(){
+  try{ refreshNameBase(); }catch(e){}   // popula sugestões nas duas visões
   const fol=document.getElementById("folgasView"), fbk=document.getElementById("feedbackView");
   const lbl=document.getElementById("tab3Label");
   const isFb = state.thirdView==="feedback";
