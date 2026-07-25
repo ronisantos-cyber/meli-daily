@@ -712,7 +712,7 @@
           </div>
           <div id="bolhasAdmin" style="display:none">
             <div class="acc">
-              <button class="acc-head" data-acc="accAtribuir"><span>Atribuir bolha a um rep (admin)</span><span class="acc-caret">▸</span></button>
+              <button class="acc-head" data-acc="accAtribuir"><span>Atribuir bolha a um rep</span><span class="acc-caret">▸</span></button>
               <div class="acc-body" id="accAtribuir" style="display:none">
                 <div class="list-add-row"><input type="text" id="atrNome" list="nameBase" placeholder="Nome do rep" autocapitalize="words"></div>
                 <div class="list-add-row"><select id="atrBolha" class="group-select" style="flex:1;min-width:0"></select><button id="atrBtn">Atribuir</button></div>
@@ -3943,8 +3943,8 @@ function renderBolhas(){
   // select de atribuição (admin)
   const atrSel=document.getElementById("atrBolha");
   if(atrSel){ atrSel.innerHTML=bolhas.map(b=>`<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join(""); }
-  // admin visível? (só a atribuição fica aqui; a lista de bolhas fica em Listas)
-  const adm=document.getElementById("bolhasAdmin"); if(adm) adm.style.display=isAdmin()?"":"none";
+  // atribuir bolha ao rep: liberado para qualquer usuário
+  const adm=document.getElementById("bolhasAdmin"); if(adm) adm.style.display="";
 
   // agrupa rep -> bolhas
   const map={};
@@ -3958,7 +3958,7 @@ function renderBolhas(){
   if(!reps.length){ list.innerHTML=`<div class="empty">Nenhum rep encontrado.</div>`; return; }
   list.innerHTML=reps.map(n=>{
     const chips=map[n].sort((a,b)=>(a.bolha||"").localeCompare(b.bolha||"")).map(r=>{
-      const x=isAdmin()?`<button class="rb-del" data-id="${r.id}" style="border:0;background:none;color:#fff;font-weight:800;margin-left:4px;cursor:pointer">×</button>`:"";
+      const x=`<button class="rb-del" data-id="${r.id}" style="border:0;background:none;color:#fff;font-weight:800;margin-left:4px;cursor:pointer">×</button>`;
       return `<span style="display:inline-flex;align-items:center;background:var(--meli-blue);color:#fff;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;margin:2px 4px 2px 0">${escapeHtml(r.bolha)}${x}</span>`;
     }).join("");
     return `<div class="item"><div class="check" style="visibility:hidden"></div>
@@ -4016,7 +4016,6 @@ let _seedingBolhas=false;
   if(fn) fn.addEventListener("input", ()=>{ if(SB.groupMode()) renderBolhas(); });
   if(fb) fb.addEventListener("change", ()=>{ if(SB.groupMode()) renderBolhas(); });
   if(ab) ab.addEventListener("click", ()=>{
-    if(!isAdmin()) return;
     const nome=((document.getElementById("atrNome")||{}).value||"").trim();
     const bolha=((document.getElementById("atrBolha")||{}).value||"");
     if(!nome||!bolha){ sysChat("Bolhas: informe nome e bolha."); return; }
