@@ -715,8 +715,9 @@
               <button class="acc-head" data-acc="accAtribuir"><span>Atribuir bolha a um rep</span><span class="acc-caret">▸</span></button>
               <div class="acc-body" id="accAtribuir" style="display:none">
                 <div class="list-add-row"><input type="text" id="atrNome" list="nameBase" placeholder="Nome do rep" autocapitalize="words"></div>
-                <div class="list-add-row"><select id="atrBolha" class="group-select" style="flex:1;min-width:0"></select><button id="atrBtn">Atribuir</button></div>
-                <div class="desc" style="margin-top:4px">A lista de bolhas é editada na aba <b>Listas</b>.</div>
+                <div id="atrBolhasChk" style="display:flex;flex-wrap:wrap;gap:10px 14px;padding:6px 2px 8px"></div>
+                <button id="atrBtn" class="folgas-add-btn">+ Atribuir selecionadas</button>
+                <div class="desc" style="margin-top:6px">Marque uma ou mais bolhas. A lista de bolhas é editada na aba <b>Listas</b>.</div>
               </div>
             </div>
           </div>
@@ -3940,9 +3941,9 @@ function renderBolhas(){
   // sugestões do campo de busca = nomes conhecidos + bolhas
   const sl=document.getElementById("bolhaSearchList");
   if(sl){ sl.innerHTML = allKnownNames().concat(bolhas).map(x=>`<option value="${escapeHtml(x)}"></option>`).join(""); }
-  // select de atribuição (admin)
-  const atrSel=document.getElementById("atrBolha");
-  if(atrSel){ atrSel.innerHTML=bolhas.map(b=>`<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join(""); }
+  // checkboxes de atribuição (múltiplas bolhas)
+  const chkBox=document.getElementById("atrBolhasChk");
+  if(chkBox){ chkBox.innerHTML=bolhas.map(b=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--ink)"><input type="checkbox" class="atr-chk" value="${escapeHtml(b)}"> ${escapeHtml(b)}</label>`).join(""); }
   // atribuir bolha ao rep: liberado para qualquer usuário
   const adm=document.getElementById("bolhasAdmin"); if(adm) adm.style.display="";
 
@@ -4017,9 +4018,16 @@ let _seedingBolhas=false;
   if(fb) fb.addEventListener("change", ()=>{ if(SB.groupMode()) renderBolhas(); });
   if(ab) ab.addEventListener("click", ()=>{
     const nome=((document.getElementById("atrNome")||{}).value||"").trim();
-    const bolha=((document.getElementById("atrBolha")||{}).value||"");
-    if(!nome||!bolha){ sysChat("Bolhas: informe nome e bolha."); return; }
-    SB.addRepBolha(nome, bolha).then(refreshGroupAndRender).then(()=>{ document.getElementById("atrNome").value=""; renderBolhas(); sysChat(`${bolha} atribuída a ${nome}.`); })
+    const marcadas=[...document.querySelectorAll("#atrBolhasChk .atr-chk:checked")].map(c=>c.value);
+    if(!nome){ sysChat("Bolhas: informe o nome do rep."); return; }
+    if(!marcadas.length){ sysChat("Bolhas: marque pelo menos uma bolha."); return; }
+    // já atribuídas a esse nome (evita duplicar)
+    const jaTem=new Set((SB.gState.repBolhas||[]).filter(r=>(r.nome||"").toLowerCase()===nome.toLowerCase()).map(r=>(r.bolha||"").toLowerCase()));
+    const novas=marcadas.filter(b=>!jaTem.has(b.toLowerCase()));
+    if(!novas.length){ sysChat(`${nome} já tem essas bolhas.`); return; }
+    Promise.all(novas.map(b=>SB.addRepBolha(nome, b)))
+      .then(refreshGroupAndRender)
+      .then(()=>{ document.getElementById("atrNome").value=""; renderBolhas(); sysChat(`${novas.length} bolha(s) atribuída(s) a ${nome}: ${novas.join(", ")}.`); })
       .catch(e=>sysChat("Erro ao atribuir: "+sbErrMsg(e)));
   });
 })();
