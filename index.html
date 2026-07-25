@@ -2685,8 +2685,8 @@ const SB = (function(){
     const [a,t,f,fb] = await Promise.all([
       client.from("anotacoes").select("*").in("grupo_id",gids).order("created_at",{ascending:true}),
       client.from("tarefas").select("*").in("grupo_id",gids).order("created_at",{ascending:true}),
-      client.from("folgas").select("*").in("grupo_id",gids).order("data",{ascending:true}),
-      client.from("feedbacks").select("*").in("grupo_id",gids).order("created_at",{ascending:false})
+      client.from("folgas").select("*").in("grupo_id",gids).is("oculto_em",null).order("data",{ascending:true}),
+      client.from("feedbacks").select("*").in("grupo_id",gids).is("oculto_em",null).order("created_at",{ascending:false})
     ]);
     gState.anotacoes = (a&&a.data)?a.data:[];
     gState.tarefas   = (t&&t.data)?t.data:[];
@@ -2694,7 +2694,7 @@ const SB = (function(){
     gState.feedbacks = (fb&&fb.data)?fb.data:[];
     // férias (best-effort; ignora se a tabela ainda não existe)
     try{
-      const fe = await client.from("ferias").select("*").in("grupo_id",gids).order("inicio",{ascending:true});
+      const fe = await client.from("ferias").select("*").in("grupo_id",gids).is("oculto_em",null).order("inicio",{ascending:true});
       gState.ferias = (fe&&fe.data)?fe.data:[];
     }catch(e){ gState.ferias = gState.ferias||[]; }
     // títulos de anotação editáveis (best-effort)
@@ -2708,12 +2708,12 @@ const SB = (function(){
       gState.bolhasOpcoes = (bo&&bo.data)?bo.data:[];
     }catch(e){ gState.bolhasOpcoes = gState.bolhasOpcoes||[]; }
     try{
-      const rb = await client.from("rep_bolhas").select("*").in("grupo_id",gids).order("nome",{ascending:true});
+      const rb = await client.from("rep_bolhas").select("*").in("grupo_id",gids).is("oculto_em",null).order("nome",{ascending:true});
       gState.repBolhas = (rb&&rb.data)?rb.data:[];
     }catch(e){ gState.repBolhas = gState.repBolhas||[]; }
     // dicionário de nomes (best-effort; ignora se a tabela ainda não existe)
     try{
-      const nn = await client.from("nomes").select("nome").in("grupo_id",gids);
+      const nn = await client.from("nomes").select("nome").in("grupo_id",gids).is("oculto_em",null);
       gState.nomes = (nn&&nn.data)?nn.data.map(r=>r.nome):[];
     }catch(e){ gState.nomes = gState.nomes||[]; }
   }
@@ -2794,6 +2794,7 @@ const SB = (function(){
     const { error } = await client.rpc("delete_nome", { p_grupo:state.groupId, p_name:nome });
     if(error) throw error;
   }
+  async function purgeOcultos(){ try{ await client.rpc("purge_ocultos"); }catch(e){} }
   async function addTitulo(t){ const { error } = await client.from("titulos").insert({ grupo_id:state.groupId, titulo:t }); if(error) throw error; }
   async function updateTitulo(id, novo){ const { error } = await client.from("titulos").update({ titulo:novo }).eq("id",id); if(error) throw error; }
   async function delTitulo(id){ const { error } = await client.from("titulos").delete().eq("id",id); if(error) throw error; }
@@ -2815,8 +2816,8 @@ const SB = (function(){
   }
   async function loadMensagens(){
     if(!client || !state.session) return [];
-    const cutoff=new Date(Date.now()-30*24*60*60*1000).toISOString();
-    // apaga as minhas com mais de 30 dias (retenção)
+    const cutoff=new Date(Date.now()-90*24*60*60*1000).toISOString();
+    // apaga as minhas com mais de 90 dias (retenção da conversa)
     try{ await client.from("mensagens").delete().eq("author_email",state.session.email).lt("created_at",cutoff); }catch(e){}
     const { data, error } = await client.from("mensagens").select("*")
       .eq("author_email",state.session.email).gte("created_at",cutoff).order("created_at",{ascending:true});
@@ -2827,7 +2828,7 @@ const SB = (function(){
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
     addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
-    addTitulo, updateTitulo, delTitulo, seedTitulos,
+    addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     del, addMensagem, loadMensagens };
 })();
@@ -3405,6 +3406,7 @@ async function afterLogin(){
   await SB.loadGroups();
   await SB.loadProfiles();
   await SB.ensureOwnProfile();
+  if(isAdmin()){ SB.purgeOcultos(); }  // limpa ocultos +30d e conversa +90d
   // histórico de conversa online (últimos 30 dias) vira a Conversa
   try{
     const msgs = await SB.loadMensagens();
@@ -3713,12 +3715,12 @@ function editNomeInline(row, nome){
 function delNomeInline(row, nome){
   if(row.parentNode.querySelector(".nm-delbox")) return;
   const box=document.createElement("div"); box.className="nm-delbox"; box.style.cssText="display:flex;flex-direction:column;gap:6px;padding:4px 2px 10px";
-  box.innerHTML=`<div style="font-size:12px;color:#991B1B;background:#FEE2E2;border:1px solid #F87171;border-radius:8px;padding:6px 8px">Apagar <b>${escapeHtml(nome)}</b> remove de <b>todas</b> as folgas e apaga <b>todos</b> os feedbacks sobre ela. Sem desfazer.</div>
-    <div style="display:flex;gap:8px"><button class="d-ok" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar exclusão</button><button class="d-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
+  box.innerHTML=`<div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px"><b>${escapeHtml(nome)}</b> e todas as folgas/feedbacks/férias/bolhas ligados a ela ficam <b>ocultos</b> (somem da visão). São apagados de vez só após <b>30 dias</b> — dá tempo de reverter se for engano.</div>
+    <div style="display:flex;gap:8px"><button class="d-ok" style="background:#EF4444;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Ocultar</button><button class="d-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
   row.after(box);
   box.querySelector(".d-no").addEventListener("click",()=>box.remove());
   box.querySelector(".d-ok").addEventListener("click",()=>{
-    SB.deleteNome(nome).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" e ocorrências apagados.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+    SB.deleteNome(nome).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" ocultado (apagado de vez em 30 dias).`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
 }
 function renderTitulosList(box){
   // auto-seed dos títulos padrão na 1ª vez (torna-os editáveis)
