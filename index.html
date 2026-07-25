@@ -105,6 +105,16 @@
     user-select:none;
   }
   .tab.active{color:var(--ink);border-bottom-color:var(--ink)}
+  /* 3ª aba: rótulo + botão de menu bem visível */
+  #tab3{display:flex;align-items:center;justify-content:center;gap:6px;padding-left:4px;padding-right:4px}
+  #tab3 #tab3Label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab3-caret{
+    flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;
+    width:22px;height:22px;border-radius:7px;
+    background:rgba(0,0,0,.16);color:var(--ink);font-size:10px;line-height:1;
+    box-shadow:0 1px 1px rgba(0,0,0,.12);
+  }
+  .tab.active .tab3-caret{background:var(--ink);color:var(--meli-yellow)}
 
   /* Tab body — the swipe area */
   .body{flex:1;position:relative;overflow:hidden;background:var(--chat-bg)}
@@ -586,7 +596,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="0">Conversa</div>
     <div class="tab" data-tab="1">Anotações</div>
-    <div class="tab" data-tab="2" id="tab3"><span id="tab3Label">Folgas</span> <span style="font-size:10px;opacity:.7">▾</span></div>
+    <div class="tab" data-tab="2" id="tab3"><span id="tab3Label">Folgas</span><span class="tab3-caret" id="tab3Caret" aria-label="Trocar aba">▼</span></div>
   </div>
 
   <!-- Barra de grupo: só aparece quando logado num grupo compartilhado. -->
@@ -3765,6 +3775,9 @@ document.addEventListener("click", function(e){
 (function(){
   const t3=document.getElementById("tab3");
   if(t3) t3.addEventListener("click",(e)=>{ if(active===2){ e.stopImmediatePropagation(); openThirdChooser(); } }, true);
+  // botão de menu (caret) abre o seletor direto, esteja ou não na aba
+  const caret=document.getElementById("tab3Caret");
+  if(caret) caret.addEventListener("click",(e)=>{ e.stopImmediatePropagation(); setTab(2); openThirdChooser(); }, true);
 })();
 
 /* base de nomes compartilhada (folgas + feedback) p/ autocompletar */
