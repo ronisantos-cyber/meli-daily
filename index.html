@@ -923,10 +923,12 @@
       <button class="modal-close" id="futuroClose">×</button>
       <h2>🔮 Atualizações futuras</h2>
       <p style="color:var(--ink-2);font-size:13px;margin:0 0 12px">O que ainda está por vir no app:</p>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="row-set"><div><div class="label">Integração com a agenda do Google</div><div class="desc">Ver e criar eventos direto no app</div></div></div>
-        <div class="row-set"><div><div class="label">Interação com IA na aba Conversa</div><div class="desc">Perguntar e receber respostas inteligentes</div></div></div>
-        <div class="row-set"><div><div class="label">Integração com LMS</div><div class="desc">Ver dados do time: nome, bolhas, LDAP, ID Groot, cargo, e mais</div></div></div>
+      <div id="futuroList" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div id="futuroAdmin" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <div style="font-weight:800;font-size:13px;margin-bottom:8px">Adicionar atualização</div>
+        <input type="text" id="futTitulo" placeholder="Título" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-bottom:6px">
+        <input type="text" id="futDesc" placeholder="Descrição (opcional)" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-bottom:6px">
+        <button id="futAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:700 13px inherit">Adicionar</button>
       </div>
     </div>
   </div>
@@ -2758,6 +2760,19 @@ const SB = (function(){
   async function updateNote(id, fields){
     const { error } = await client.from("anotacoes").update(fields).eq("id",id); if(error) throw error;
   }
+  async function loadAtualizacoes(){
+    const { data, error } = await client.from("atualizacoes").select("*").order("ordem",{ascending:true}).order("created_at",{ascending:true});
+    if(error) throw error; return data||[];
+  }
+  async function addAtualizacao(titulo, descricao){
+    const { error } = await client.from("atualizacoes").insert({ titulo, descricao: descricao||"" }); if(error) throw error;
+  }
+  async function updateAtualizacao(id, fields){
+    const { error } = await client.from("atualizacoes").update(fields).eq("id",id); if(error) throw error;
+  }
+  async function delAtualizacao(id){
+    const { error } = await client.from("atualizacoes").delete().eq("id",id); if(error) throw error;
+  }
   async function addFolgaRow(data, nomes, motivo){
     const m=me();
     const row={ grupo_id:state.groupId, data, nomes, author_email:m.email, author_nome:m.nome };
@@ -2831,7 +2846,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, updateNote, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     del, addMensagem, loadMensagens };
@@ -3514,13 +3529,66 @@ async function sbBoot(){
   if(shade) shade.addEventListener("click", e=>{ if(e.target===shade) shade.classList.remove("open"); });
 })();
 
-/* Atualizações futuras (modal) */
+/* Atualizações futuras (modal) — lista salva no banco; só admin edita */
+const DEFAULT_FUTURAS=[
+  {titulo:"Integração com a agenda do Google", descricao:"Ver e criar eventos direto no app"},
+  {titulo:"Interação com IA na aba Conversa", descricao:"Perguntar e receber respostas inteligentes"},
+  {titulo:"Integração com LMS", descricao:"Ver dados do time: nome, bolhas, LDAP, ID Groot, cargo, e mais"}
+];
+async function renderFuturas(){
+  const list=document.getElementById("futuroList"), adm=document.getElementById("futuroAdmin");
+  if(!list) return;
+  const admin = SB.loggedIn() && isAdmin();
+  if(adm) adm.style.display = admin ? "" : "none";
+  let rows=[];
+  try{ if(SB.loggedIn()) rows=await SB.loadAtualizacoes(); }catch(e){ rows=[]; }
+  if(!rows.length){
+    list.innerHTML = DEFAULT_FUTURAS.map(f=>`<div class="row-set"><div><div class="label">${escapeHtml(f.titulo)}</div><div class="desc">${escapeHtml(f.descricao)}</div></div></div>`).join("");
+    return;
+  }
+  list.innerHTML = rows.map(f=>{
+    const ctrls = admin ? `<div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="fut-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;cursor:pointer">✎</button>
+        <button class="fut-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;cursor:pointer">×</button></div>` : "";
+    return `<div class="row-set" data-fid="${f.id}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="min-width:0"><div class="label">${escapeHtml(f.titulo)}</div><div class="desc">${escapeHtml(f.descricao||"")}</div></div>${ctrls}</div>`;
+  }).join("");
+  if(admin){
+    list.querySelectorAll(".fut-del[data-id]").forEach(b=>b.addEventListener("click",()=>{
+      SB.delAtualizacao(b.dataset.id).then(renderFuturas).catch(e=>alert("Erro: "+sbErrMsg(e)));
+    }));
+    list.querySelectorAll(".fut-edit[data-id]").forEach(b=>b.addEventListener("click",()=>editFuturaInline(b.dataset.id, rows)));
+  }
+}
+function editFuturaInline(id, rows){
+  const f=rows.find(r=>r.id===id); if(!f) return;
+  const row=document.querySelector('.row-set[data-fid="'+id+'"]'); if(!row) return;
+  row.innerHTML=`<div style="flex:1;min-width:0">
+    <input type="text" class="fe-t" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:14px inherit;margin-bottom:4px">
+    <input type="text" class="fe-d" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:13px inherit">
+    <div style="display:flex;gap:6px;margin-top:6px"><button class="fe-save" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Salvar</button><button class="fe-cancel" style="background:#E5E7EB;color:#111;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Cancelar</button></div>
+  </div>`;
+  row.querySelector(".fe-t").value=f.titulo||""; row.querySelector(".fe-d").value=f.descricao||"";
+  row.querySelector(".fe-cancel").addEventListener("click",renderFuturas);
+  row.querySelector(".fe-save").addEventListener("click",()=>{
+    const t=(row.querySelector(".fe-t").value||"").trim(), d=(row.querySelector(".fe-d").value||"").trim();
+    if(!t){ renderFuturas(); return; }
+    SB.updateAtualizacao(id,{titulo:t,descricao:d}).then(renderFuturas).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  });
+}
 (function(){
   const shade=document.getElementById("futuroShade");
   const openB=document.getElementById("futuroBtn"), closeB=document.getElementById("futuroClose");
-  if(openB) openB.addEventListener("click", ()=>{ if(shade) shade.classList.add("open"); });
+  if(openB) openB.addEventListener("click", ()=>{ if(shade) shade.classList.add("open"); renderFuturas(); });
   if(closeB) closeB.addEventListener("click", ()=>{ if(shade) shade.classList.remove("open"); });
   if(shade) shade.addEventListener("click", e=>{ if(e.target===shade) shade.classList.remove("open"); });
+  const futAdd=document.getElementById("futAdd");
+  if(futAdd) futAdd.addEventListener("click",()=>{
+    const ti=document.getElementById("futTitulo"), di=document.getElementById("futDesc");
+    const t=(ti&&ti.value||"").trim(), d=(di&&di.value||"").trim();
+    if(!t) return;
+    SB.addAtualizacao(t,d).then(()=>{ if(ti)ti.value=""; if(di)di.value=""; return renderFuturas(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  });
 })();
 
 /* settings: salvar config e sair */
