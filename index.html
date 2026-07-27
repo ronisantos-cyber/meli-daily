@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Meli Daily">
-<link rel="icon" type="image/png" href="icon-192-v5.png">
-<link rel="apple-touch-icon" href="icon-192-v5.png">
-<link rel="manifest" href="manifest-v5.webmanifest">
+<link rel="icon" type="image/png" href="icon-192-v6.png">
+<link rel="apple-touch-icon" href="icon-192-v6.png">
+<link rel="manifest" href="manifest-v6.webmanifest">
 <title>Meli Daily Assistant</title>
 <style>
   :root{
@@ -2755,6 +2755,9 @@ const SB = (function(){
   async function updateTask(id, fields){
     const { error } = await client.from("tarefas").update(fields).eq("id",id); if(error) throw error;
   }
+  async function updateNote(id, fields){
+    const { error } = await client.from("anotacoes").update(fields).eq("id",id); if(error) throw error;
+  }
   async function addFolgaRow(data, nomes, motivo){
     const m=me();
     const row={ grupo_id:state.groupId, data, nomes, author_email:m.email, author_nome:m.nome };
@@ -2828,7 +2831,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     del, addMensagem, loadMensagens };
@@ -2898,8 +2901,11 @@ function renderGroupNotes(){
     const byTitle={};
     notes.forEach(n=>{ const k=(n.titulo||"").toUpperCase(); (byTitle[k]=byTitle[k]||[]).push(n); });
     const entryMeta = n => {
-      const del = isMine(n.author_email) ? `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 2px;cursor:pointer">×</button>` : "";
-      return `<span style="display:inline-flex;align-items:center;gap:2px;flex-shrink:0">${authChip(n.author_email)}${del}</span>`;
+      const ctrls = isAdmin()
+        ? `<button class="nedit" data-id="${n.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 2px;cursor:pointer">✎</button>`+
+          `<button class="ndel" data-id="${n.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 2px;cursor:pointer">×</button>`
+        : "";
+      return `<span style="display:inline-flex;align-items:center;gap:2px;flex-shrink:0">${authChip(n.author_email)}${ctrls}</span>`;
     };
     Object.keys(byTitle).sort().forEach(title=>{
       const entries=byTitle[title];
@@ -2908,7 +2914,7 @@ function renderGroupNotes(){
         const meta = single ? "" : `<div style="flex-shrink:0">${entryMeta(n)}</div>`;
         const num = single ? "" : `<b style="color:var(--ink)">${i+1})</b> `;
         return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin:6px 0">
-          <div style="min-width:0;white-space:pre-wrap;word-break:break-word;font-size:13px;color:var(--ink-2);line-height:1.45">${num}${escapeHtml(n.conteudo||"")}</div>
+          <div id="ntxt-${n.id}" style="min-width:0;white-space:pre-wrap;word-break:break-word;font-size:13px;color:var(--ink-2);line-height:1.45">${num}${escapeHtml(n.conteudo||"")}</div>
           ${meta}
         </div>`;
       }).join("");
@@ -2952,12 +2958,35 @@ function renderGroupNotes(){
       SB.del("anotacoes", b.dataset.id).then(refreshGroupAndRender).then(()=>sysChat("Anotação excluída.")).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
     });
   });
+  // editar anotação (só admin)
+  panel.querySelectorAll(".nedit[data-id]").forEach(b=>{
+    b.addEventListener("click",(ev)=>{ ev.stopPropagation(); editNoteInline(b.dataset.id); });
+  });
   // clique na tarefa: editar/apagar (só autor)
   panel.querySelectorAll(".item[data-taskid]").forEach(el=>{
     el.addEventListener("click",(ev)=>{
       if(ev.target.closest(".authchip")) return;
       openTaskActions(el, el.dataset.taskid, el.dataset.mine==="1");
     });
+  });
+}
+
+function editNoteInline(id){
+  if(!isAdmin()) return;
+  const n=SB.gState.anotacoes.find(r=>r.id===id); if(!n) return;
+  const txt=document.getElementById("ntxt-"+id); if(!txt||txt.dataset.editing==="1") return;
+  txt.dataset.editing="1"; txt.style.display="none";
+  const box=document.createElement("div"); box.style.cssText="margin-top:4px;flex:1;min-width:0";
+  box.innerHTML=`<textarea class="ne-inp" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:13px inherit;min-height:64px"></textarea>`+
+    `<div style="display:flex;gap:6px;margin-top:6px"><button class="ne-save" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Salvar</button>`+
+    `<button class="ne-cancel" style="background:#E5E7EB;color:#111;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Cancelar</button></div>`;
+  txt.parentNode.insertBefore(box, txt.nextSibling);
+  const ta=box.querySelector(".ne-inp"); ta.value=n.conteudo||""; ta.focus();
+  const done=()=>{ if(box.parentNode) box.parentNode.removeChild(box); txt.style.display=""; txt.dataset.editing=""; };
+  box.querySelector(".ne-cancel").addEventListener("click",(e)=>{ e.stopPropagation(); done(); });
+  box.querySelector(".ne-save").addEventListener("click",(e)=>{ e.stopPropagation();
+    const v=(ta.value||"").trim(); if(!v){ done(); return; }
+    SB.updateNote(id,{conteudo:v}).then(refreshGroupAndRender).then(()=>sysChat("Anotação atualizada.")).catch(err=>sysChat("Erro: "+sbErrMsg(err)));
   });
 }
 
