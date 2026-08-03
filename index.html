@@ -588,6 +588,10 @@
     <button class="icon-btn" id="refreshBtn" aria-label="Atualizar" style="margin-right:2px">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
     </button>
+    <button class="icon-btn" id="checklistBtn" aria-label="Checklist" style="margin-right:2px;position:relative">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <span id="checklistBadge" style="display:none;position:absolute;top:2px;right:2px;min-width:16px;height:16px;background:#EF4444;color:#fff;border-radius:999px;font-size:10px;font-weight:800;line-height:16px;text-align:center;padding:0 3px"></span>
+    </button>
     <button class="icon-btn" id="settingsBtn" aria-label="Configurações">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -787,6 +791,27 @@
         <button class="conn-btn connect" id="installBtnSettings">⬇ Adicionar à tela inicial</button>
       </div>
 
+      <h3>Checklist</h3>
+      <label class="row-set" style="cursor:pointer">
+        <div><div class="label">Abrir no Checklist</div><div class="desc">Ao iniciar/retomar, mostra o checklist primeiro</div></div>
+        <input type="checkbox" id="ckHomeToggle" style="width:20px;height:20px">
+      </label>
+      <label class="row-set" style="cursor:pointer">
+        <div><div class="label">Lembretes de pendências</div><div class="desc">Notifica no celular/PC quando houver itens pendentes</div></div>
+        <input type="checkbox" id="ckNotifToggle" style="width:20px;height:20px">
+      </label>
+      <div class="row-set">
+        <div><div class="label">Intervalo do lembrete</div><div class="desc">A cada quantos minutos verificar</div></div>
+        <select id="ckNotifMin" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
+          <option value="15">15 min</option>
+          <option value="30">30 min</option>
+          <option value="60">1 hora</option>
+          <option value="120">2 horas</option>
+          <option value="240">4 horas</option>
+        </select>
+      </div>
+      <div class="info" style="font-size:12px;color:var(--ink-2);margin:2px 0 10px">Os lembretes funcionam com o app aberto ou em segundo plano. Com o app totalmente fechado, o celular pode não disparar (limitação de apps web sem servidor de push).</div>
+
       <h3>Atualizações futuras</h3>
       <div style="display:flex;gap:8px;margin:6px 0 10px">
         <button class="conn-btn connect" id="futuroBtn">🔮 Ver atualizações futuras</button>
@@ -930,6 +955,42 @@
         <input type="text" id="futDesc" placeholder="Descrição (opcional)" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-bottom:6px">
         <button id="futAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:700 13px inherit">Adicionar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal Checklist -->
+  <div class="modal-shade" id="checklistShade">
+    <div class="modal" style="max-height:88vh;display:flex;flex-direction:column">
+      <button class="modal-close" id="checklistClose">×</button>
+      <h2>✅ Checklist</h2>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px">
+        <div style="font-weight:800;font-size:13px;margin-bottom:8px">Novo item</div>
+        <input type="text" id="ckTitulo" placeholder="Descrição do item" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;font:14px inherit;margin-bottom:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <label style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Categoria
+            <select id="ckCategoria" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
+              <option value="diario">Diário</option>
+              <option value="semanal">Semanal</option>
+              <option value="mensal">Mensal</option>
+            </select>
+          </label>
+          <label style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Recorrência
+            <select id="ckRecorrencia" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
+              <option value="unico">Único</option>
+              <option value="todo_mes">Todo mês</option>
+              <option value="toda_semana">Toda semana</option>
+              <option value="dia_mes">Todo dia X do mês</option>
+              <option value="dia_semana">Todo dia X da semana</option>
+            </select>
+          </label>
+        </div>
+        <div id="ckValorWrap" style="display:none;margin-bottom:8px">
+          <label style="font-size:12px;color:var(--ink-2)" id="ckValorLbl">Dia do mês (1–31)</label>
+          <select id="ckValor" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px"></select>
+        </div>
+        <button id="ckAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:700 13px inherit">Adicionar</button>
+      </div>
+      <div id="checklistBody" style="overflow:auto;flex:1"></div>
     </div>
   </div>
 
@@ -2818,6 +2879,19 @@ const SB = (function(){
   async function delAtualizacao(id){
     const { error } = await client.from("atualizacoes").delete().eq("id",id); if(error) throw error;
   }
+  async function loadChecklist(){
+    const { data, error } = await client.from("checklist").select("*").order("categoria",{ascending:true}).order("created_at",{ascending:true});
+    if(error) throw error; return data||[];
+  }
+  async function addChecklistItem(item){
+    const { error } = await client.from("checklist").insert(item); if(error) throw error;
+  }
+  async function updateChecklistItem(id, fields){
+    const { error } = await client.from("checklist").update(fields).eq("id",id); if(error) throw error;
+  }
+  async function delChecklistItem(id){
+    const { error } = await client.from("checklist").delete().eq("id",id); if(error) throw error;
+  }
   async function addFolgaRow(data, nomes, motivo){
     const m=me();
     const row={ grupo_id:state.groupId, data, nomes, author_email:m.email, author_nome:m.nome };
@@ -2891,7 +2965,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     del, addMensagem, loadMensagens };
@@ -3518,6 +3592,7 @@ async function afterLogin(){
   updateSbUI(); updateDaySummary();
   if(active===1) renderTasksView();
   if(active===2) applyThirdView();
+  try{ ckOnAppReady(); }catch(e){}
 }
 
 async function sbBoot(){
@@ -3634,6 +3709,148 @@ function editFuturaInline(id, rows){
     if(!t) return;
     SB.addAtualizacao(t,d).then(()=>{ if(ti)ti.value=""; if(di)di.value=""; return renderFuturas(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
   });
+})();
+
+/* =========================== CHECKLIST diário/semanal/mensal =========================== */
+const WD_NAMES=["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+function ckPref(k,def){ try{ const v=localStorage.getItem(k); return v===null?def:v; }catch(_){ return def; } }
+function ckSetPref(k,v){ try{ localStorage.setItem(k,v); }catch(_){} }
+function isoWeekKey(d){
+  const dt=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+  const day=(dt.getUTCDay()+6)%7; dt.setUTCDate(dt.getUTCDate()-day+3);
+  const firstThu=new Date(Date.UTC(dt.getUTCFullYear(),0,4));
+  const week=1+Math.round(((dt-firstThu)/86400000-3+((firstThu.getUTCDay()+6)%7))/7);
+  return dt.getUTCFullYear()+"-W"+String(week).padStart(2,"0");
+}
+function ckPeriodKey(rec,d){ d=d||new Date();
+  if(rec==="toda_semana"||rec==="dia_semana") return isoWeekKey(d);
+  if(rec==="todo_mes"||rec==="dia_mes") return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  return "once";
+}
+function ckIsDone(it){
+  if(!it.feito_em) return false;
+  if(it.recorrencia==="unico"||!it.recorrencia) return true;
+  const done=new Date(it.feito_em+"T00:00:00");
+  return ckPeriodKey(it.recorrencia,done)===ckPeriodKey(it.recorrencia,new Date());
+}
+function ckIsDue(it){
+  const now=new Date();
+  if(it.recorrencia==="dia_mes" && it.rec_valor) return now.getDate()>=it.rec_valor;
+  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return now.getDay()>=it.rec_valor;
+  return true;
+}
+function ckPending(items){ return (items||[]).filter(it=>!ckIsDone(it) && ckIsDue(it)); }
+function ckRecLabel(it){
+  switch(it.recorrencia){
+    case "todo_mes": return "todo mês";
+    case "toda_semana": return "toda semana";
+    case "dia_mes": return "todo dia "+(it.rec_valor||"?")+" do mês";
+    case "dia_semana": return "toda "+(WD_NAMES[it.rec_valor]||"?");
+    default: return "único";
+  }
+}
+let _ckCache=[];
+async function loadCkCache(){ try{ if(SB.loggedIn()) _ckCache=await SB.loadChecklist(); }catch(_){ } return _ckCache; }
+function updateChecklistBadge(){
+  const badge=document.getElementById("checklistBadge"); if(!badge) return;
+  const n=ckPending(_ckCache).length;
+  if(n>0){ badge.textContent=n>99?"99+":String(n); badge.style.display=""; } else badge.style.display="none";
+}
+async function renderChecklist(){
+  const body=document.getElementById("checklistBody"); if(!body) return;
+  await loadCkCache(); updateChecklistBadge();
+  const cats=[["diario","Diário"],["semanal","Semanal"],["mensal","Mensal"]];
+  let html="";
+  cats.forEach(([cat,label])=>{
+    const list=_ckCache.filter(i=>(i.categoria||"diario")===cat).slice().sort((a,b)=>(ckIsDone(a)?1:0)-(ckIsDone(b)?1:0));
+    html+=`<div class="subcat-h">${label}</div>`;
+    if(!list.length){ html+=`<div class="empty">Sem itens.</div>`; return; }
+    html+=list.map(it=>{
+      const done=ckIsDone(it);
+      const rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
+      return `<div class="item ${done?"done":""}" style="align-items:center">
+        <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
+        <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}</div></div>
+        <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
+      </div>`;
+    }).join("");
+  });
+  body.innerHTML=html;
+  body.querySelectorAll(".ck-toggle[data-id]").forEach(el=>el.addEventListener("click",()=>{
+    const it=_ckCache.find(x=>x.id===el.dataset.id); if(!it) return;
+    const novo = ckIsDone(it) ? null : todayKey();
+    SB.updateChecklistItem(it.id,{feito_em:novo}).then(renderChecklist).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  }));
+  body.querySelectorAll(".ck-del[data-id]").forEach(el=>el.addEventListener("click",()=>{
+    SB.delChecklistItem(el.dataset.id).then(renderChecklist).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  }));
+}
+function openChecklist(){ const s=document.getElementById("checklistShade"); if(s) s.classList.add("open"); renderChecklist(); }
+(function(){
+  const shade=document.getElementById("checklistShade");
+  const openB=document.getElementById("checklistBtn"), closeB=document.getElementById("checklistClose");
+  if(openB) openB.addEventListener("click", openChecklist);
+  if(closeB) closeB.addEventListener("click", ()=>{ if(shade) shade.classList.remove("open"); });
+  if(shade) shade.addEventListener("click", e=>{ if(e.target===shade) shade.classList.remove("open"); });
+  const recSel=document.getElementById("ckRecorrencia"), valWrap=document.getElementById("ckValorWrap"), valSel=document.getElementById("ckValor"), valLbl=document.getElementById("ckValorLbl");
+  function refreshValor(){
+    if(!recSel) return; const r=recSel.value;
+    if(r==="dia_mes"){ valWrap.style.display=""; valLbl.textContent="Dia do mês (1–31)"; valSel.innerHTML=Array.from({length:31},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""); }
+    else if(r==="dia_semana"){ valWrap.style.display=""; valLbl.textContent="Dia da semana"; valSel.innerHTML=WD_NAMES.map((n,i)=>`<option value="${i}">${n}</option>`).join(""); }
+    else { valWrap.style.display="none"; }
+  }
+  if(recSel) recSel.addEventListener("change", refreshValor);
+  const addB=document.getElementById("ckAdd");
+  if(addB) addB.addEventListener("click", ()=>{
+    const ti=document.getElementById("ckTitulo"); const t=(ti&&ti.value||"").trim(); if(!t) return;
+    const item={ titulo:t, categoria:document.getElementById("ckCategoria").value, recorrencia:recSel.value };
+    if(item.recorrencia==="dia_mes"||item.recorrencia==="dia_semana") item.rec_valor=parseInt(valSel.value,10);
+    SB.addChecklistItem(item).then(()=>{ ti.value=""; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  });
+})();
+
+/* Alertas de pendências (funciona com o app aberto/em 2º plano) */
+let _ckNotifTimer=null;
+async function ckCheckAndNotify(){
+  if(ckPref("ck_notif","0")!=="1") return;
+  if(!("Notification" in window) || Notification.permission!=="granted") return;
+  await loadCkCache(); updateChecklistBadge();
+  const pend=ckPending(_ckCache); if(!pend.length) return;
+  const body=pend.slice(0,5).map(i=>"• "+i.titulo).join("\n")+(pend.length>5?`\n+${pend.length-5} mais`:"");
+  const title=`✅ ${pend.length} pendência(s) no checklist`;
+  try{
+    const reg=navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if(reg && reg.showNotification) reg.showNotification(title,{body,icon:"icon-192-v6.png",tag:"checklist-pend"});
+    else new Notification(title,{body});
+  }catch(_){ try{ new Notification(title,{body}); }catch(__){} }
+}
+function ckStartNotifTimer(){
+  clearInterval(_ckNotifTimer);
+  if(ckPref("ck_notif","0")!=="1") return;
+  const min=Math.max(5, parseInt(ckPref("ck_notif_min","60"),10)||60);
+  _ckNotifTimer=setInterval(ckCheckAndNotify, min*60000);
+  ckCheckAndNotify();
+}
+async function ckOnAppReady(){
+  await loadCkCache(); updateChecklistBadge(); ckStartNotifTimer();
+  if(ckPref("ck_home","0")==="1"){ setTimeout(openChecklist, 350); }
+}
+(function(){
+  const home=document.getElementById("ckHomeToggle"), notif=document.getElementById("ckNotifToggle"), min=document.getElementById("ckNotifMin");
+  if(home){ home.checked=ckPref("ck_home","0")==="1"; home.addEventListener("change",()=>ckSetPref("ck_home",home.checked?"1":"0")); }
+  if(min){ min.value=ckPref("ck_notif_min","60"); min.addEventListener("change",()=>{ ckSetPref("ck_notif_min",min.value); ckStartNotifTimer(); }); }
+  if(notif){
+    notif.checked=ckPref("ck_notif","0")==="1";
+    notif.addEventListener("change", async ()=>{
+      if(notif.checked){
+        if(!("Notification" in window)){ alert("Este navegador não suporta notificações."); notif.checked=false; return; }
+        let perm=Notification.permission;
+        if(perm!=="granted"){ try{ perm=await Notification.requestPermission(); }catch(_){ perm="denied"; } }
+        if(perm!=="granted"){ alert("Permissão de notificação negada. Ative nas configurações do navegador."); notif.checked=false; ckSetPref("ck_notif","0"); ckStartNotifTimer(); return; }
+      }
+      ckSetPref("ck_notif",notif.checked?"1":"0"); ckStartNotifTimer();
+    });
+  }
 })();
 
 /* settings: salvar config e sair */
