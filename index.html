@@ -4406,9 +4406,8 @@ function renderFerias(){
     const dur=daysBetween(f.inicio,f.fim);
     const tipo=f.tipo||"Férias", col=tipoColor(tipo), isFeri=tipoNorm(tipo).includes("feri");
     const cd=feriaCountdown(f);
-    const mine=isMine(f.author_email);
-    const edit=mine?`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;cursor:pointer">✎</button>`:"";
-    const del=mine?`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
+    const edit=`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;cursor:pointer">✎</button>`;
+    const del=`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`;
     // barra dividida em dias do mês
     let cells="";
     for(let d=1; d<=lastDay; d++){
