@@ -717,6 +717,8 @@
           </div>
           <div id="feriasAddForm" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 4px 10px">
             <input type="text" id="feriaNomeInput" list="nameBase" placeholder="Nome" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;font:14px inherit;margin-bottom:6px">
+            <label style="font-size:11px;color:var(--ink-2)">Tipo de ausência</label>
+            <select id="feriaTipoInput" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;font:14px inherit;margin-bottom:6px"></select>
             <div style="display:flex;gap:6px;margin-bottom:6px">
               <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Início</label><input type="date" id="feriaInicioInput" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
               <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Fim</label><input type="date" id="feriaFimInput" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
@@ -768,6 +770,11 @@
           <div class="acc">
             <button class="acc-head" data-acc="accBolhasBody"><span>Bolhas</span><span class="acc-caret">▸</span></button>
             <div class="acc-body" id="accBolhasBody" style="display:none"></div>
+          </div>
+
+          <div class="acc">
+            <button class="acc-head" data-acc="accTiposAusBody"><span>Tipos de ausência</span><span class="acc-caret">▸</span></button>
+            <div class="acc-body" id="accTiposAusBody" style="display:none"></div>
           </div>
         </div>
       </section>
@@ -2789,7 +2796,7 @@ const DEFAULT_BOLHAS = ["Picking Continuo","Picking tradicional","Pick to Ship",
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[], titulos:[], bolhasOpcoes:[], repBolhas:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[], titulos:[], bolhasOpcoes:[], repBolhas:[], tiposAusencia:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2913,6 +2920,11 @@ const SB = (function(){
       const nn = await client.from("nomes").select("nome").in("grupo_id",gids).is("oculto_em",null);
       gState.nomes = (nn&&nn.data)?nn.data.map(r=>r.nome):[];
     }catch(e){ gState.nomes = gState.nomes||[]; }
+    // tipos de ausência (Férias/Afastamento/Licença…) — best-effort
+    try{
+      const ta = await client.from("tipos_ausencia").select("*").in("grupo_id",gids).order("ordem",{ascending:true});
+      gState.tiposAusencia = (ta&&ta.data)?ta.data:[];
+    }catch(e){ gState.tiposAusencia = gState.tiposAusencia||[]; }
   }
   // registra um nome no dicionário do grupo (acumula; ignora duplicado/erro)
   async function addNome(nome){
@@ -3005,12 +3017,18 @@ const SB = (function(){
     if(error) throw error;
     addNome(pessoa); // registra o nome no dicionário
   }
-  async function addFeria(nome, inicio, fim){
+  async function addFeria(nome, inicio, fim, tipo){
     const m=me();
-    const { error } = await client.from("ferias").insert({ grupo_id:state.groupId, nome, inicio, fim, author_email:m.email, author_nome:m.nome });
-    if(error) throw error;
+    const row={ grupo_id:state.groupId, nome, inicio, fim, author_email:m.email, author_nome:m.nome };
+    if(tipo) row.tipo=tipo;
+    let res = await client.from("ferias").insert(row);
+    if(res.error && /tipo/i.test(res.error.message||"")){ delete row.tipo; res = await client.from("ferias").insert(row); }
+    if(res.error) throw res.error;
     addNome(nome);
   }
+  async function addTipoAusencia(t){ const { error } = await client.from("tipos_ausencia").insert({ grupo_id:state.groupId, tipo:t }); if(error) throw error; }
+  async function delTipoAusencia(id){ const { error } = await client.from("tipos_ausencia").delete().eq("id",id); if(error) throw error; }
+  async function seedTiposAusencia(defaults){ for(const t of defaults){ try{ await client.from("tipos_ausencia").insert({ grupo_id:state.groupId, tipo:t }); }catch(e){} } }
   async function del(table, id){ const { error } = await client.from(table).delete().eq("id",id); if(error) throw error; }
   async function renameNome(oldN, newN){
     const { error } = await client.rpc("rename_nome", { p_grupo:state.groupId, p_old:oldN, p_new:newN });
@@ -3056,6 +3074,7 @@ const SB = (function(){
     addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
+    addTipoAusencia, delTipoAusencia, seedTiposAusencia,
     del, addMensagem, loadMensagens };
 })();
 
@@ -4081,6 +4100,36 @@ function renderListas(){
   if(nb) renderNomesList(nb);
   if(tb) renderTitulosList(tb);
   if(bb) renderBolhasSection(bb);
+  const ab=document.getElementById("accTiposAusBody");
+  if(ab) renderTiposAusenciaList(ab);
+}
+let _seedingTipos=false;
+function renderTiposAusenciaList(box){
+  if((SB.gState.tiposAusencia||[]).length===0 && isAdmin() && !_seedingTipos){
+    _seedingTipos=true; box.innerHTML='<div class="empty">Preparando tipos...</div>';
+    SB.seedTiposAusencia(DEFAULT_TIPOS_AUS).then(()=>refreshGroupAndRender()).then(()=>{ _seedingTipos=false; renderListas(); }).catch(()=>{ _seedingTipos=false; });
+    return;
+  }
+  const rows=(SB.gState.tiposAusencia||[]).slice().sort((a,b)=>(a.tipo||"").localeCompare(b.tipo||"","pt",{sensitivity:"base"}));
+  const tipos = rows.length ? rows : DEFAULT_TIPOS_AUS.map(t=>({id:null,tipo:t}));
+  const dot = t=>`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${tipoColor(t)};margin-right:7px;vertical-align:-1px"></span>`;
+  if(!isAdmin()){
+    box.innerHTML = tipos.map(r=>`<div class="list-row"><span class="lr-name">${dot(r.tipo)}${escapeHtml(r.tipo)}</span></div>`).join("");
+    return;
+  }
+  let html='<div class="list-add-row"><input type="text" id="addTipoInp" placeholder="Novo tipo (ex.: Licença médica)" autocomplete="off" data-lpignore="true"><button id="addTipoBtn">Adicionar</button></div>';
+  html+= tipos.map(r=>`<div class="list-row" data-id="${r.id}">
+      <span class="lr-name">${dot(r.tipo)}${escapeHtml(r.tipo)}</span>
+      ${r.id?`<button class="lr-btn tipo-del" style="background:#EF4444;color:#fff">Apagar</button>`:""}
+    </div>`).join("");
+  box.innerHTML=html;
+  const inp=box.querySelector("#addTipoInp"), addb=box.querySelector("#addTipoBtn");
+  if(addb) addb.addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v) return;
+    SB.addTipoAusencia(v).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Tipo "${v}" adicionado.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  box.querySelectorAll(".tipo-del").forEach(b=>{
+    const id=b.closest(".list-row").dataset.id;
+    b.addEventListener("click",()=>{ SB.delTipoAusencia(id).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat("Tipo removido.")).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  });
 }
 /* lista de bolhas dentro de Listas — editável só pelo admin, demais só veem */
 function renderBolhasSection(box){
@@ -4306,41 +4355,80 @@ const MESES_PT=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","A
 function pad2n(n){ return (n<10?"0":"")+n; }
 function ddmm(dstr){ const p=String(dstr||"").split("-"); return p.length===3 ? (p[2]+"."+p[1]) : dstr; }
 function daysBetween(a,b){ const d1=new Date(a+"T00:00:00"), d2=new Date(b+"T00:00:00"); return Math.round((d2-d1)/86400000)+1; }
+const DEFAULT_TIPOS_AUS=["Férias","Afastamento","Licença"];
+function currentTiposAusencia(){ const t=(SB.gState.tiposAusencia||[]).map(x=>x.tipo).filter(Boolean); return t.length?t:DEFAULT_TIPOS_AUS.slice(); }
+function tipoNorm(t){ return (t||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""); }
+function tipoColor(t){ const n=tipoNorm(t);
+  if(n.includes("feri")) return "#2563EB";     // Férias — azul
+  if(n.includes("licen")) return "#7C3AED";    // Licença — roxo
+  if(n.includes("afast")) return "#16A34A";    // Afastamento — verde
+  return "#64748B";                             // outros — cinza
+}
+function dayDiff(a,b){ return Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000); }
+function feriaCountdown(f){
+  const today=todayKey();
+  if(today < (f.inicio||"")){ const d=dayDiff(today,f.inicio); return {txt:`faltam ${d} dia${d>1?"s":""} para iniciar`, cls:"#2563EB"}; }
+  if(today > (f.fim||"")){ return {txt:"encerrada", cls:"var(--ink-2)"}; }
+  const d=dayDiff(today,f.fim);
+  return {txt: d===0?"último dia":`faltam ${d} dia${d>1?"s":""} para acabar`, cls:"#16A34A"};
+}
+function fillTipoSelect(){
+  const sel=document.getElementById("feriaTipoInput"); if(!sel) return;
+  const cur=sel.value; const tipos=currentTiposAusencia();
+  sel.innerHTML=tipos.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+  if(cur && tipos.includes(cur)) sel.value=cur;
+}
 function renderFerias(){
   const lbl=document.getElementById("feriasMonthLabel");
   const list=document.getElementById("feriasList");
   if(!list) return;
-  const y=feriasCursor.y, m=feriasCursor.m;
+  fillTipoSelect();
+  const y=feriasCursor.y, m=feriasCursor.m, today=todayKey();
   if(lbl) lbl.textContent = MESES_PT[m]+" "+y;
   const monthStart=`${y}-${pad2n(m+1)}-01`;
   const lastDay=new Date(y, m+1, 0).getDate();
   const monthEnd=`${y}-${pad2n(m+1)}-${pad2n(lastDay)}`;
-  // férias que cruzam o mês (inicio<=fimMes E fim>=inicioMes)
+  // contagem de FÉRIAS por dia (para a regra dos 3+ sobrepostos = vermelho)
+  const countF={};
+  (SB.gState.ferias||[]).forEach(f=>{
+    if(!tipoNorm(f.tipo||"Férias").includes("feri")) return;
+    let d=new Date(Math.max(new Date((f.inicio||"9999-12-31")+"T00:00:00"), new Date(monthStart+"T00:00:00")));
+    const end=new Date(Math.min(new Date((f.fim||"0000-01-01")+"T00:00:00"), new Date(monthEnd+"T00:00:00")));
+    for(; d<=end; d.setDate(d.getDate()+1)){ const ds=fmtDate(d); countF[ds]=(countF[ds]||0)+1; }
+  });
   const rows=(SB.gState.ferias||[]).filter(f=> (f.inicio||"")<=monthEnd && (f.fim||"")>=monthStart )
     .sort((a,b)=>(a.inicio||"").localeCompare(b.inicio||""));
-  if(!rows.length){ list.innerHTML=`<div class="empty">Sem férias em ${MESES_PT[m]} de ${y}.</div>`; return; }
+  // escala de dias (1,5,10,...) reutilizável
+  let scale=""; for(let d=1; d<=lastDay; d++){ const mk=(d===1||d%5===0||d===lastDay); scale+=`<div style="flex:1;text-align:center;font-size:9px;color:var(--ink-2);line-height:1.2">${mk?d:""}</div>`; }
+  if(!rows.length){ list.innerHTML=`<div class="empty">Sem ausências em ${MESES_PT[m]} de ${y}.</div>`; return; }
   list.innerHTML=rows.map(f=>{
     const dur=daysBetween(f.inicio,f.fim);
-    // barra: posição relativa dentro do mês
-    const s=new Date(Math.max(new Date(f.inicio+"T00:00:00"), new Date(monthStart+"T00:00:00")));
-    const e=new Date(Math.min(new Date(f.fim+"T00:00:00"), new Date(monthEnd+"T00:00:00")));
-    const startDay=s.getDate(), endDay=e.getDate();
-    const leftPct=((startDay-1)/lastDay)*100, widPct=((endDay-startDay+1)/lastDay)*100;
+    const tipo=f.tipo||"Férias", col=tipoColor(tipo), isFeri=tipoNorm(tipo).includes("feri");
+    const cd=feriaCountdown(f);
     const mine=isMine(f.author_email);
     const del=mine?`<button class="fer-del" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
+    // barra dividida em dias do mês
+    let cells="";
+    for(let d=1; d<=lastDay; d++){
+      const ds=`${y}-${pad2n(m+1)}-${pad2n(d)}`;
+      const inP = ds>=(f.inicio||"") && ds<=(f.fim||"");
+      let bg;
+      if(inP){ bg=(isFeri && countF[ds]>=3) ? "#DC2626" : col; }
+      else { bg = (ds<today) ? "#E2E5EA" : "#F3F4F6"; }
+      const tdy = ds===today;
+      cells+=`<div title="${d}" style="flex:1;height:18px;background:${bg};border-right:1px solid rgba(255,255,255,.75);${tdy?'box-shadow:inset 0 0 0 2px #111;':''}"></div>`;
+    }
     return `<div class="item" style="align-items:flex-start">
       <div class="check" style="visibility:hidden"></div>
       <div class="item-body" style="min-width:0">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-          <div class="item-title" style="min-width:0">${escapeHtml(f.nome)}${del}</div>
-          <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)}</span>
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="item-title" style="min-width:0;display:flex;align-items:center;gap:6px">${escapeHtml(f.nome)}
+            <span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${del}</div>
+          <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)} · ${dur} dia${dur>1?"s":""}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-          <div style="flex:1;height:6px;background:#E5E7EB;border-radius:6px;position:relative;min-width:0">
-            <div style="position:absolute;top:0;bottom:0;left:${leftPct}%;width:${widPct}%;background:var(--meli-blue);border-radius:6px"></div>
-          </div>
-          <span style="flex-shrink:0;font-size:11px;color:var(--ink-2)">${dur} dia${dur>1?"s":""}</span>
-        </div>
+        <div style="font-size:12px;font-weight:700;color:${cd.cls};margin:5px 0 4px">${cd.txt}</div>
+        <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--line)">${cells}</div>
+        <div style="display:flex;margin-top:2px">${scale}</div>
       </div></div>`;
   }).join("");
   list.querySelectorAll(".fer-del[data-id]").forEach(b=>{
@@ -4358,7 +4446,7 @@ function renderFerias(){
   const saveB=document.getElementById("feriaSaveBtn"), cancelB=document.getElementById("feriaCancelBtn");
   if(prev) prev.addEventListener("click",()=>{ feriasCursor.m--; if(feriasCursor.m<0){feriasCursor.m=11;feriasCursor.y--;} renderFerias(); });
   if(next) next.addEventListener("click",()=>{ feriasCursor.m++; if(feriasCursor.m>11){feriasCursor.m=0;feriasCursor.y++;} renderFerias(); });
-  if(addB) addB.addEventListener("click",()=>{ if(form) form.style.display = form.style.display==="none"?"":"none"; refreshNameBase(); });
+  if(addB) addB.addEventListener("click",()=>{ if(form) form.style.display = form.style.display==="none"?"":"none"; refreshNameBase(); try{ fillTipoSelect(); }catch(e){} });
   if(cancelB) cancelB.addEventListener("click",()=>{ if(form) form.style.display="none"; });
   if(saveB) saveB.addEventListener("click",()=>{
     if(!SB.groupMode()){ sysChat("Entre num grupo pra lançar férias."); return; }
@@ -4368,13 +4456,14 @@ function renderFerias(){
     if(!nome){ sysChat("Férias: digite o nome."); return; }
     if(!/^\d{4}-\d{2}-\d{2}$/.test(ini)||!/^\d{4}-\d{2}-\d{2}$/.test(fim)){ sysChat("Férias: escolha início e fim."); return; }
     if(fim<ini){ sysChat("Férias: fim antes do início."); return; }
-    SB.addFeria(nome, ini, fim).then(refreshGroupAndRender).then(()=>{
+    const tipo=(document.getElementById("feriaTipoInput")||{}).value||"Férias";
+    SB.addFeria(nome, ini, fim, tipo).then(refreshGroupAndRender).then(()=>{
       document.getElementById("feriaNomeInput").value=""; document.getElementById("feriaInicioInput").value=""; document.getElementById("feriaFimInput").value="";
       if(form) form.style.display="none";
       // pula pro mês do início lançado
       const p=ini.split("-"); feriasCursor={y:+p[0], m:(+p[1])-1};
-      renderFerias(); sysChat(`Férias de ${nome} (${ddmm(ini)}–${ddmm(fim)}) lançadas.`);
-    }).catch(e=>sysChat("Erro ao lançar férias: "+sbErrMsg(e)));
+      renderFerias(); sysChat(`${tipo} de ${nome} (${ddmm(ini)}–${ddmm(fim)}) lançada.`);
+    }).catch(e=>sysChat("Erro ao lançar ausência: "+sbErrMsg(e)));
   });
 })();
 
