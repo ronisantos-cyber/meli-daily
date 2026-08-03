@@ -3026,6 +3026,7 @@ const SB = (function(){
     if(res.error) throw res.error;
     addNome(nome);
   }
+  async function updateFeria(id, fields){ const { error } = await client.from("ferias").update(fields).eq("id",id); if(error) throw error; }
   async function addTipoAusencia(t){ const { error } = await client.from("tipos_ausencia").insert({ grupo_id:state.groupId, tipo:t }); if(error) throw error; }
   async function delTipoAusencia(id){ const { error } = await client.from("tipos_ausencia").delete().eq("id",id); if(error) throw error; }
   async function seedTiposAusencia(defaults){ for(const t of defaults){ try{ await client.from("tipos_ausencia").insert({ grupo_id:state.groupId, tipo:t }); }catch(e){} } }
@@ -3074,7 +3075,7 @@ const SB = (function(){
     addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
-    addTipoAusencia, delTipoAusencia, seedTiposAusencia,
+    updateFeria, addTipoAusencia, delTipoAusencia, seedTiposAusencia,
     del, addMensagem, loadMensagens };
 })();
 
@@ -4406,7 +4407,8 @@ function renderFerias(){
     const tipo=f.tipo||"Férias", col=tipoColor(tipo), isFeri=tipoNorm(tipo).includes("feri");
     const cd=feriaCountdown(f);
     const mine=isMine(f.author_email);
-    const del=mine?`<button class="fer-del" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
+    const edit=mine?`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;cursor:pointer">✎</button>`:"";
+    const del=mine?`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
     // barra dividida em dias do mês
     let cells="";
     for(let d=1; d<=lastDay; d++){
@@ -4423,7 +4425,7 @@ function renderFerias(){
       <div class="item-body" style="min-width:0">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
           <div class="item-title" style="min-width:0;display:flex;align-items:center;gap:6px">${escapeHtml(f.nome)}
-            <span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${del}</div>
+            <span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${edit}${del}</div>
           <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)} · ${dur} dia${dur>1?"s":""}</span>
         </div>
         <div style="font-size:12px;font-weight:700;color:${cd.cls};margin:5px 0 4px">${cd.txt}</div>
@@ -4438,6 +4440,42 @@ function renderFerias(){
       clearTimeout(tmr);
       SB.del("ferias",b.dataset.id).then(refreshGroupAndRender).then(()=>renderFerias()).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
     });
+  });
+  list.querySelectorAll(".fer-edit[data-id]").forEach(b=>{
+    b.addEventListener("click",(ev)=>{ ev.stopPropagation(); openFeriaEdit(b.dataset.id); });
+  });
+}
+function openFeriaEdit(id){
+  const f=(SB.gState.ferias||[]).find(x=>x.id===id); if(!f) return;
+  const btn=document.querySelector('.fer-edit[data-id="'+id+'"]'); if(!btn) return;
+  const body=btn.closest(".item-body"); if(!body || body.querySelector(".fer-edit-form")) return;
+  const tipos=currentTiposAusencia();
+  const box=document.createElement("div");
+  box.className="fer-edit-form";
+  box.style.cssText="margin-top:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px";
+  box.innerHTML=`
+    <label style="font-size:11px;color:var(--ink-2)">Tipo de ausência</label>
+    <select class="fe-tipo" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-bottom:6px">${tipos.map(t=>`<option ${t===(f.tipo||'Férias')?'selected':''}>${escapeHtml(t)}</option>`).join("")}</select>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Início</label><input type="date" class="fe-ini" value="${f.inicio||''}" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
+      <div style="flex:1"><label style="font-size:11px;color:var(--ink-2)">Fim</label><input type="date" class="fe-fim" value="${f.fim||''}" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="fe-save" style="flex:1;background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:8px;font:700 13px inherit">Salvar</button>
+      <button class="fe-cancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:8px 14px;font:700 13px inherit">Cancelar</button>
+    </div>`;
+  body.appendChild(box);
+  box.querySelector(".fe-cancel").addEventListener("click",()=>box.remove());
+  box.querySelector(".fe-save").addEventListener("click",()=>{
+    const tipo=box.querySelector(".fe-tipo").value;
+    const ini=box.querySelector(".fe-ini").value||"";
+    const fim=box.querySelector(".fe-fim").value||"";
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ini)||!/^\d{4}-\d{2}-\d{2}$/.test(fim)){ sysChat("Escolha início e fim."); return; }
+    if(fim<ini){ sysChat("Fim antes do início."); return; }
+    SB.updateFeria(id,{tipo,inicio:ini,fim}).then(refreshGroupAndRender).then(()=>{
+      const p=ini.split("-"); feriasCursor={y:+p[0],m:(+p[1])-1};
+      renderFerias(); sysChat("Ausência atualizada.");
+    }).catch(e=>sysChat("Erro: "+sbErrMsg(e)));
   });
 }
 (function(){
