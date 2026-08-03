@@ -116,6 +116,20 @@
   }
   .tab.active .tab3-caret{background:var(--ink);color:var(--meli-yellow)}
 
+  /* Abas extras só no desktop (até 6 fixas; o resto no menu da última) */
+  .dtab{display:none}
+  @media (min-width:768px){
+    .device{width:min(1040px,96vw);height:min(880px,96vh);border-radius:18px}
+    #tab3{display:none}
+    .dtab{
+      display:flex;align-items:center;justify-content:center;gap:6px;
+      flex:1;text-align:center;padding:10px 8px 11px;font-size:13.5px;font-weight:600;
+      color:rgba(0,0,0,.55);cursor:pointer;border-bottom:3px solid transparent;user-select:none;
+    }
+    .dtab.active{color:var(--ink);border-bottom-color:var(--ink)}
+    .dtab.active .tab3-caret{background:var(--ink);color:var(--meli-yellow)}
+  }
+
   /* Tab body — the swipe area */
   .body{flex:1;position:relative;overflow:hidden;background:var(--chat-bg)}
   .pages{
@@ -601,6 +615,10 @@
     <div class="tab active" data-tab="0">Conversa</div>
     <div class="tab" data-tab="1">Anotações</div>
     <div class="tab" data-tab="2" id="tab3"><span id="tab3Label">Folgas</span><span class="tab3-caret" id="tab3Caret" aria-label="Trocar aba">▼</span></div>
+    <div class="dtab" data-third="folgas">Folgas</div>
+    <div class="dtab" data-third="feedback">Feedback</div>
+    <div class="dtab" data-third="nomes">Listas</div>
+    <div class="dtab" id="dtabMore" title="Mais abas"><span id="dtabMoreLabel">Férias</span><span class="tab3-caret">▼</span></div>
   </div>
 
   <!-- Barra de grupo: só aparece quando logado num grupo compartilhado. -->
@@ -1182,8 +1200,25 @@ function setTab(i){
   if(stack) stack.style.display = (i === 0) ? "block" : "none";
   if(i===1) renderTasksView();
   if(i===2) applyThirdView();
+  try{ updateDeskTabsActive(); }catch(e){}
 }
 tabs.forEach(t=>t.addEventListener("click",()=>setTab(+t.dataset.tab)));
+/* Abas fixas extras no desktop: mapeiam para a 3ª página trocando a "view". */
+function updateDeskTabsActive(){
+  const dtabs=document.querySelectorAll(".dtab"); if(!dtabs.length) return;
+  dtabs.forEach(d=>d.classList.remove("active"));
+  const more=document.getElementById("dtabMore"), moreLbl=document.getElementById("dtabMoreLabel");
+  if(active===2){
+    const v=state.thirdView;
+    const fixedEl=document.querySelector('.dtab[data-third="'+v+'"]');
+    if(fixedEl) fixedEl.classList.add("active");
+    else if(more){ more.classList.add("active"); if(moreLbl) moreLbl.textContent = v==="bolhas"?"Bolhas":(v==="ferias"?"Férias":"Mais"); }
+  }
+}
+document.querySelectorAll('.dtab[data-third]').forEach(d=>d.addEventListener("click",()=>{
+  state.thirdView=d.dataset.third; setTab(2); try{ applyThirdView(); }catch(e){}
+}));
+(function(){ const more=document.getElementById("dtabMore"); if(more) more.addEventListener("click", ()=>{ try{ openThirdChooser(); }catch(e){} }); })();
 
 let touchX=null,touchY=null,dragging=false;
 document.querySelector(".body").addEventListener("touchstart", e=>{
@@ -3244,6 +3279,16 @@ function updateDaySummary(){
 }
 
 /* badge vermelho no robô = folgas pendentes de aprovação */
+function goToFolgas(){
+  if(!SB.groupMode()) return;
+  state.thirdView="folgas";
+  setTab(2);
+  try{ applyThirdView(); }catch(e){}
+}
+(function(){
+  const av=document.querySelector(".header .avatar");
+  if(av){ av.style.cursor="pointer"; av.title="Abrir Folgas"; av.addEventListener("click", goToFolgas); }
+})();
 function updatePendingBadge(){
   const av=document.querySelector(".header .avatar"); if(!av) return;
   let dot=document.getElementById("pendingDot");
@@ -3945,6 +3990,7 @@ function applyThirdView(){
   if(bol) bol.style.display = (v==="bolhas")?"":"none";
   if(lbl) lbl.textContent = v==="feedback"?"Feedback":(v==="nomes"?"Listas":(v==="ferias"?"Férias":(v==="bolhas"?"Bolhas":"Folgas")));
   try{ if(v==="feedback") renderFeedback(); else if(v==="nomes") renderListas(); else if(v==="ferias") renderFerias(); else if(v==="bolhas") renderBolhas(); else renderFolgasView(); }catch(e){}
+  try{ updateDeskTabsActive(); }catch(e){}
 }
 function openThirdChooser(){
   if(document.getElementById("thirdChooser")) return;
@@ -3994,8 +4040,8 @@ function renderBolhasSection(box){
     SB.seedBolhas(DEFAULT_BOLHAS).then(()=>refreshGroupAndRender()).then(()=>{ _seedingBolhas=false; renderListas(); }).catch(()=>{ _seedingBolhas=false; });
     return;
   }
-  const rows=(SB.gState.bolhasOpcoes||[]).slice();
-  const bolhas = rows.length ? rows : DEFAULT_BOLHAS.map(b=>({id:null,bolha:b}));
+  const rows=(SB.gState.bolhasOpcoes||[]).slice().sort((a,b)=>(a.bolha||"").localeCompare(b.bolha||"","pt",{sensitivity:"base"}));
+  const bolhas = rows.length ? rows : DEFAULT_BOLHAS.slice().sort((a,b)=>a.localeCompare(b,"pt",{sensitivity:"base"})).map(b=>({id:null,bolha:b}));
   if(!isAdmin()){
     box.innerHTML = bolhas.length
       ? bolhas.map(r=>`<div class="list-row"><span class="lr-name">${escapeHtml(r.bolha)}</span></div>`).join("")
@@ -4083,7 +4129,7 @@ function renderTitulosList(box){
     SB.seedTitulos(NOTE_TITLES).then(()=>refreshGroupAndRender()).then(()=>{ _seedingTitulos=false; renderListas(); }).catch(()=>{ _seedingTitulos=false; });
     return;
   }
-  const rows=(SB.gState.titulos||[]).slice();
+  const rows=(SB.gState.titulos||[]).slice().sort((a,b)=>(a.titulo||"").localeCompare(b.titulo||"","pt",{sensitivity:"base"}));
   let html='<div class="list-add-row"><input type="text" id="addTitInp" placeholder="Novo título" autocomplete="off" data-lpignore="true"><button id="addTitBtn">Adicionar</button></div>';
   html+= rows.length ? rows.map(r=>`
     <div class="list-row" data-id="${r.id}" data-tit="${escapeHtml(r.titulo)}">
