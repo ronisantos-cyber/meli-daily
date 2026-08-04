@@ -3401,12 +3401,16 @@ let _rtTimer=null;
 function onRealtime(){ clearTimeout(_rtTimer); _rtTimer=setTimeout(()=>{ SB.loadProfiles().then(refreshGroupAndRender); }, 250); }
 
 /* ---------- comandos de chat no grupo ---------- */
+// palavras que apontam para um título (sinônimos). chave = palavra (minúscula)
+const TITLE_ALIASES={ "setup":"Setup_Time", "bip":"Setup_Time", "meal":"Meal_Accuracy", "catraca":"Meal_Accuracy" };
 function handleGroupCommand(trimmed){
-  // Atalho: se a 1ª palavra for exatamente um título pré-definido (sem case),
+  // Atalho: se a 1ª palavra for exatamente um título pré-definido (ou um sinônimo),
   // vira anotação sem precisar do "Anotar" na frente.
   const fw=trimmed.match(/^(\S+)([\s\S]*)$/);
   if(fw){
-    const cano=currentTitles().find(t=>t.toLowerCase()===fw[1].toLowerCase());
+    const w=fw[1].toLowerCase();
+    let cano=currentTitles().find(t=>t.toLowerCase()===w);
+    if(!cano && TITLE_ALIASES[w]) cano=TITLE_ALIASES[w];
     if(cano){
       const texto=fw[2].replace(/^[ \t]*\n?/,"").replace(/^[ \t]+/,"");
       const titulo=cano.toUpperCase(), dia=chatDay();
@@ -3445,7 +3449,14 @@ function handleGroupCommand(trimmed){
     sysChat(buildGroupSummaryText(todayKey()));
     return true;
   }
-  return false;
+  // fallback: qualquer outro texto vira uma anotação em "ANOTAÇÕES GERAIS"
+  {
+    const dia=chatDay(), titulo="ANOTAÇÕES GERAIS";
+    SB.addNote(dia, currentSubcatDefault(), titulo, trimmed).then(refreshGroupAndRender)
+      .then(()=>{ sysChat(`Anotado em Anotações Gerais (${formatPretty(dia)}).`); afterChatCreate(); })
+      .catch(e=>sysChat("Erro ao salvar: "+sbErrMsg(e)));
+    return true;
+  }
 }
 
 // Resumo em texto do dia selecionado, com dados do grupo.
