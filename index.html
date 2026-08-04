@@ -787,7 +787,7 @@
        depender de posicionamento absoluto — some/aparece só trocando display. -->
   <div class="bottom-stack" id="bottomStack">
     <div class="quick" id="quickReplies">
-      <button id="btnAnotacao" data-prefill="Anotar: ">🗒️ Anotação</button>
+      <button id="btnAnotacao" data-prefill="Anotar: " style="display:inline-flex;align-items:center;gap:6px">🗒️ Anotação <span class="tab3-caret" id="btnAnotacaoCaret" aria-label="Ver títulos">▼</span></button>
       <button id="btnResumoDia" data-q="Resumo do dia" title="Toque: resumo · Segure: escolher data para criar">📊 Resumo Dia</button>
     </div>
     <div class="composer">
@@ -1010,6 +1010,7 @@
           <label style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Recorrência
             <select id="ckRecorrencia" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
               <option value="unico">Único</option>
+              <option value="todo_dia">Todo dia</option>
               <option value="todo_mes">Todo mês</option>
               <option value="toda_semana">Toda semana</option>
               <option value="dia_mes">Todo dia X do mês</option>
@@ -1022,6 +1023,11 @@
           <select id="ckValor" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px"></select>
         </div>
         <button id="ckAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:700 13px inherit">Adicionar</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <label style="font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="ckShowDone" style="width:16px;height:16px"> Mostrar concluídos
+        </label>
       </div>
       <div id="checklistBody" style="overflow:auto;flex:1"></div>
     </div>
@@ -3811,6 +3817,7 @@ function isoWeekKey(d){
   return dt.getUTCFullYear()+"-W"+String(week).padStart(2,"0");
 }
 function ckPeriodKey(rec,d){ d=d||new Date();
+  if(rec==="todo_dia") return fmtDate(d);
   if(rec==="toda_semana"||rec==="dia_semana") return isoWeekKey(d);
   if(rec==="todo_mes"||rec==="dia_mes") return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
   return "once";
@@ -3821,15 +3828,17 @@ function ckIsDone(it){
   const done=new Date(it.feito_em+"T00:00:00");
   return ckPeriodKey(it.recorrencia,done)===ckPeriodKey(it.recorrencia,new Date());
 }
-function ckIsDue(it){
+// item é relevante HOJE? (fixos em dia específico só aparecem no dia marcado)
+function ckRelevantToday(it){
   const now=new Date();
-  if(it.recorrencia==="dia_mes" && it.rec_valor) return now.getDate()>=it.rec_valor;
-  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return now.getDay()>=it.rec_valor;
+  if(it.recorrencia==="dia_mes" && (it.rec_valor||it.rec_valor===0)) return now.getDate()===it.rec_valor;
+  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return now.getDay()===it.rec_valor;
   return true;
 }
-function ckPending(items){ return (items||[]).filter(it=>!ckIsDone(it) && ckIsDue(it)); }
+function ckPending(items){ return (items||[]).filter(it=>ckRelevantToday(it) && !ckIsDone(it)); }
 function ckRecLabel(it){
   switch(it.recorrencia){
+    case "todo_dia": return "todo dia";
     case "todo_mes": return "todo mês";
     case "toda_semana": return "toda semana";
     case "dia_mes": return "todo dia "+(it.rec_valor||"?")+" do mês";
@@ -3837,7 +3846,7 @@ function ckRecLabel(it){
     default: return "único";
   }
 }
-let _ckCache=[];
+let _ckCache=[]; let _ckShowDone=false;
 async function loadCkCache(){ try{ if(SB.loggedIn()) _ckCache=await SB.loadChecklist(); }catch(_){ } return _ckCache; }
 function updateChecklistBadge(){
   const badge=document.getElementById("checklistBadge"); if(!badge) return;
@@ -3850,9 +3859,13 @@ function paintChecklist(){
   const cats=[["diario","Diário"],["semanal","Semanal"],["mensal","Mensal"]];
   let html="";
   cats.forEach(([cat,label])=>{
-    const list=_ckCache.filter(i=>(i.categoria||"diario")===cat).slice().sort((a,b)=>(ckIsDone(a)?1:0)-(ckIsDone(b)?1:0));
+    // relevantes hoje (fixos em dia específico só aparecem no dia marcado)
+    const relev=_ckCache.filter(i=>(i.categoria||"diario")===cat && ckRelevantToday(i));
+    const active=relev.filter(i=>!ckIsDone(i));
+    const done=_ckShowDone ? relev.filter(i=>ckIsDone(i)) : [];
+    const list=active.concat(done);   // pendentes primeiro; concluídos só se o toggle estiver ligado
     html+=`<div class="subcat-h">${label}</div>`;
-    if(!list.length){ html+=`<div class="empty">Sem itens.</div>`; return; }
+    if(!list.length){ html+=`<div class="empty">${_ckShowDone?"Nada aqui.":"Nada pendente."}</div>`; return; }
     html+=list.map(it=>{
       const done=ckIsDone(it);
       const rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
@@ -3892,6 +3905,8 @@ function openChecklist(){ const s=document.getElementById("checklistShade"); if(
   if(openB) openB.addEventListener("click", openChecklist);
   if(closeB) closeB.addEventListener("click", ()=>{ if(shade) shade.classList.remove("open"); });
   if(shade) shade.addEventListener("click", e=>{ if(e.target===shade) shade.classList.remove("open"); });
+  const showDoneCb=document.getElementById("ckShowDone");
+  if(showDoneCb) showDoneCb.addEventListener("change",()=>{ _ckShowDone=showDoneCb.checked; paintChecklist(); });
   const recSel=document.getElementById("ckRecorrencia"), valWrap=document.getElementById("ckValorWrap"), valSel=document.getElementById("ckValor"), valLbl=document.getElementById("ckValorLbl");
   function refreshValor(){
     if(!recSel) return; const r=recSel.value;
@@ -4020,6 +4035,9 @@ if(dateInput) dateInput.addEventListener("change", ()=>{ if(SB.groupMode() && ac
   btn.addEventListener("touchmove",()=>{ clearTimeout(timer); });
   btn.addEventListener("contextmenu",e=>{ e.preventDefault(); openMenu(); });
   btn.addEventListener("click",e=>{ if(longFired){ e.preventDefault(); e.stopImmediatePropagation(); longFired=false; } }, true);
+  // botão lateral (caret) abre o menu de títulos direto
+  const caret=document.getElementById("btnAnotacaoCaret");
+  if(caret) caret.addEventListener("click",(e)=>{ e.stopPropagation(); e.preventDefault(); openMenu(); longFired=false; });
 })();
 
 /* botão Atualizar (ao lado da engrenagem) */
