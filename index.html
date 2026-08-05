@@ -1026,7 +1026,7 @@
       </div>
       <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
         <label style="font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="ckShowDone" style="width:16px;height:16px"> Mostrar concluídos
+          <input type="checkbox" id="ckShowDone" style="width:16px;height:16px"> Mostrar ocultos
         </label>
       </div>
       <div id="checklistBody" style="overflow:auto;flex:1"></div>
@@ -3865,6 +3865,28 @@ function updateChecklistBadge(){
   const n=ckPending(_ckCache).length;
   if(n>0){ badge.textContent=n>99?"99+":String(n); badge.style.display=""; } else badge.style.display="none";
 }
+function ckNextDate(it){
+  const now=new Date(); now.setHours(0,0,0,0);
+  if(it.recorrencia==="dia_mes" && it.rec_valor){
+    let d=new Date(now.getFullYear(),now.getMonth(),it.rec_valor);
+    if(d<now) d=new Date(now.getFullYear(),now.getMonth()+1,it.rec_valor);
+    return d;
+  }
+  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)){
+    let add=(it.rec_valor-now.getDay()+7)%7; if(add===0) add=7;
+    const d=new Date(now); d.setDate(now.getDate()+add); return d;
+  }
+  return null;
+}
+function ckItemHtml(it, extra){
+  const done=ckIsDone(it);
+  const rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
+  return `<div class="item ${done?"done":""}" style="align-items:center">
+    <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
+    <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}${extra||""}</div></div>
+    <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
+  </div>`;
+}
 function paintChecklist(){
   const body=document.getElementById("checklistBody"); if(!body) return;
   updateChecklistBadge();
@@ -3875,19 +3897,19 @@ function paintChecklist(){
     const relev=_ckCache.filter(i=>(i.categoria||"diario")===cat && ckRelevantToday(i));
     const active=relev.filter(i=>!ckIsDone(i));
     const done=_ckShowDone ? relev.filter(i=>ckIsDone(i)) : [];
-    const list=active.concat(done);   // pendentes primeiro; concluídos só se o toggle estiver ligado
+    const list=active.concat(done);   // pendentes primeiro; concluídos só se "mostrar ocultos" ligado
     html+=`<div class="subcat-h">${label}</div>`;
     if(!list.length){ html+=`<div class="empty">${_ckShowDone?"Nada aqui.":"Nada pendente."}</div>`; return; }
-    html+=list.map(it=>{
-      const done=ckIsDone(it);
-      const rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
-      return `<div class="item ${done?"done":""}" style="align-items:center">
-        <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
-        <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}</div></div>
-        <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
-      </div>`;
-    }).join("");
+    html+=list.map(it=>ckItemHtml(it)).join("");
   });
+  // Seção "Agendados": só quando "Mostrar ocultos" está ligado — itens de dia fixo fora do dia
+  if(_ckShowDone){
+    const agend=_ckCache.filter(i=>!ckRelevantToday(i))
+      .sort((a,b)=>{ const da=ckNextDate(a), db=ckNextDate(b); return (da?da.getTime():0)-(db?db.getTime():0); });
+    html+=`<div class="subcat-h" style="margin-top:14px">📅 Agendados</div>`;
+    if(!agend.length){ html+=`<div class="empty">Nenhum agendado.</div>`; }
+    else html+=agend.map(it=>{ const d=ckNextDate(it); const px=d?` <span style="font-size:11px;color:var(--meli-blue);font-weight:700"> · próx. ${d.getDate()}/${d.getMonth()+1}</span>`:""; return ckItemHtml(it, px); }).join("");
+  }
   body.innerHTML=html;
   body.querySelectorAll(".ck-toggle[data-id]").forEach(el=>el.addEventListener("click", async ()=>{
     const it=_ckCache.find(x=>x.id===el.dataset.id); if(!it) return;
