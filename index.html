@@ -118,19 +118,18 @@
 
   /* Abas extras só no desktop (até 6 fixas; o resto no menu da última) */
   .dtab{display:none}
-  @media (min-width:768px){
-    .device{width:98vw;height:98vh;max-width:1600px;border-radius:16px}
-    #tab3{display:none}
-    .tabs{overflow:hidden}
-    .tab,.dtab{min-width:92px}
-    .dtab{
-      display:flex;align-items:center;justify-content:center;gap:6px;
-      flex:1;text-align:center;padding:10px 8px 11px;font-size:13.5px;font-weight:600;
-      color:rgba(0,0,0,.55);cursor:pointer;border-bottom:3px solid transparent;user-select:none;
-    }
-    .dtab.active{color:var(--ink);border-bottom-color:var(--ink)}
-    .dtab.active .tab3-caret{background:var(--ink);color:var(--meli-yellow)}
+  /* Visão completa (desktop) — ativada pela classe body.desk (controlada via JS) */
+  body.desk .device{width:98vw;height:98vh;max-width:1600px;border-radius:16px}
+  body.desk #tab3{display:none}
+  body.desk .tabs{overflow:hidden}
+  body.desk .tab, body.desk .dtab{min-width:92px}
+  body.desk .dtab{
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    flex:1;text-align:center;padding:10px 8px 11px;font-size:13.5px;font-weight:600;
+    color:rgba(0,0,0,.55);cursor:pointer;border-bottom:3px solid transparent;user-select:none;
   }
+  body.desk .dtab.active{color:var(--ink);border-bottom-color:var(--ink)}
+  body.desk .dtab.active .tab3-caret{background:var(--ink);color:var(--meli-yellow)}
 
   /* Tab body — the swipe area */
   .body{flex:1;position:relative;overflow:hidden;background:var(--chat-bg)}
@@ -819,6 +818,12 @@
         <button class="conn-btn connect" id="installBtnSettings">⬇ Adicionar à tela inicial</button>
       </div>
 
+      <h3>Aparência</h3>
+      <label class="row-set" style="cursor:pointer">
+        <div><div class="label">Usar visão Android no computador</div><div class="desc">Força o layout estreito (como no celular), mesmo em telas grandes</div></div>
+        <input type="checkbox" id="viewMobileToggle" style="width:20px;height:20px">
+      </label>
+
       <h3>Checklist</h3>
       <label class="row-set" style="cursor:pointer">
         <div><div class="label">Abrir no Checklist</div><div class="desc">Ao iniciar/retomar, mostra o checklist primeiro</div></div>
@@ -1227,7 +1232,7 @@ function layoutDeskTabs(){
   const bar=document.querySelector(".tabs"); if(!bar) return;
   const more=document.getElementById("dtabMore");
   const thirds=[...document.querySelectorAll(".dtab[data-third]")];
-  if(window.innerWidth < 768){ _hiddenThirds=[]; return; }  // mobile: CSS cuida
+  if(!document.body.classList.contains("desk")){ _hiddenThirds=[]; return; }  // visão android: CSS cuida
   // começa mostrando todas as abas de terceira e esconde o botão
   thirds.forEach(t=>{ t.style.display=""; });
   if(more) more.style.display="none";
@@ -1278,9 +1283,18 @@ document.querySelectorAll('.dtab[data-third]').forEach(d=>d.addEventListener("cl
   state.thirdView=d.dataset.third; setTab(2); try{ applyThirdView(); }catch(e){}
 }));
 (function(){ const more=document.getElementById("dtabMore"); if(more) more.addEventListener("click",(e)=>{ e.stopPropagation(); openHiddenChooser(); }); })();
-(function(){ let t=null; window.addEventListener("resize",()=>{ clearTimeout(t); t=setTimeout(layoutDeskTabs,120); }); })();
-window.addEventListener("load", ()=>{ try{ layoutDeskTabs(); }catch(e){} });
-try{ layoutDeskTabs(); }catch(e){}
+// Decide entre visão completa (desktop) e visão android (estreita).
+// Só usa visão completa se a tela for larga E o usuário não tiver forçado android.
+function applyViewMode(){
+  let forceMobile=false;
+  try{ forceMobile = localStorage.getItem("view_mobile")==="1"; }catch(_){}
+  const desk = (window.innerWidth>=768) && !forceMobile;
+  document.body.classList.toggle("desk", desk);
+  try{ layoutDeskTabs(); }catch(e){}
+}
+(function(){ let t=null; window.addEventListener("resize",()=>{ clearTimeout(t); t=setTimeout(applyViewMode,120); }); })();
+window.addEventListener("load", ()=>{ try{ applyViewMode(); }catch(e){} });
+try{ applyViewMode(); }catch(e){}
 
 let touchX=null,touchY=null,dragging=false;
 document.querySelector(".body").addEventListener("touchstart", e=>{
@@ -3698,7 +3712,7 @@ async function afterLogin(){
   if(active===1) renderTasksView();
   if(active===2) applyThirdView();
   try{ ckOnAppReady(); }catch(e){}
-  try{ layoutDeskTabs(); }catch(e){}
+  try{ applyViewMode(); }catch(e){}
 }
 
 async function sbBoot(){
@@ -3896,8 +3910,9 @@ function paintChecklist(){
     // relevantes hoje (fixos em dia específico só aparecem no dia marcado)
     const relev=_ckCache.filter(i=>(i.categoria||"diario")===cat && ckRelevantToday(i));
     const active=relev.filter(i=>!ckIsDone(i));
-    const done=_ckShowDone ? relev.filter(i=>ckIsDone(i)) : [];
-    const list=active.concat(done);   // pendentes primeiro; concluídos só se "mostrar ocultos" ligado
+    // concluídos aparecem só quando "mostrar ocultos" ligado E foram concluídos HOJE
+    const done=_ckShowDone ? relev.filter(i=>ckIsDone(i) && i.feito_em===todayKey()) : [];
+    const list=active.concat(done);
     html+=`<div class="subcat-h">${label}</div>`;
     if(!list.length){ html+=`<div class="empty">${_ckShowDone?"Nada aqui.":"Nada pendente."}</div>`; return; }
     html+=list.map(it=>ckItemHtml(it)).join("");
@@ -3993,6 +4008,8 @@ async function ckOnAppReady(){
   if(ckPref("ck_home","0")==="1"){ setTimeout(openChecklist, 350); }
 }
 (function(){
+  const vm=document.getElementById("viewMobileToggle");
+  if(vm){ vm.checked=ckPref("view_mobile","0")==="1"; vm.addEventListener("change",()=>{ ckSetPref("view_mobile",vm.checked?"1":"0"); try{ applyViewMode(); }catch(e){} }); }
   const home=document.getElementById("ckHomeToggle"), notif=document.getElementById("ckNotifToggle"), min=document.getElementById("ckNotifMin");
   if(home){ home.checked=ckPref("ck_home","0")==="1"; home.addEventListener("change",()=>ckSetPref("ck_home",home.checked?"1":"0")); }
   if(min){ min.value=ckPref("ck_notif_min","60"); min.addEventListener("change",()=>{ ckSetPref("ck_notif_min",min.value); ckStartNotifTimer(); }); }
