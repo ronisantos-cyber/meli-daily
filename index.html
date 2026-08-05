@@ -3403,6 +3403,7 @@ function onRealtime(){ clearTimeout(_rtTimer); _rtTimer=setTimeout(()=>{ SB.load
 /* ---------- comandos de chat no grupo ---------- */
 // palavras que apontam para um título (sinônimos). chave = palavra (minúscula)
 const TITLE_ALIASES={ "setup":"Setup_Time", "bip":"Setup_Time", "meal":"Meal_Accuracy", "catraca":"Meal_Accuracy" };
+try{ console.log("Meli Daily • build 2026-08-04 (sinonimos + anotacoes gerais)"); window.__meliBuild="2026-08-04-geral"; }catch(_){}
 function handleGroupCommand(trimmed){
   // Atalho: se a 1ª palavra for exatamente um título pré-definido (ou um sinônimo),
   // vira anotação sem precisar do "Anotar" na frente.
