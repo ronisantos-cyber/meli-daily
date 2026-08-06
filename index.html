@@ -1007,12 +1007,13 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <label style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Categoria
             <select id="ckCategoria" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
+              <option value="unico" selected>Único</option>
               <option value="diario">Diário</option>
               <option value="semanal">Semanal</option>
               <option value="mensal">Mensal</option>
             </select>
           </label>
-          <label style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Recorrência
+          <label id="ckRecWrap" style="flex:1;min-width:120px;font-size:12px;color:var(--ink-2)">Recorrência
             <select id="ckRecorrencia" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
               <option value="unico">Único</option>
               <option value="todo_dia">Todo dia</option>
@@ -1029,7 +1030,11 @@
         </div>
         <button id="ckAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:700 13px inherit">Adicionar</button>
       </div>
-      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="date" id="ckViewDate" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:12px inherit">
+          <button id="ckViewToday" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:5px 10px;font:700 12px inherit;cursor:pointer">Hoje</button>
+        </div>
         <label style="font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="ckShowDone" style="width:16px;height:16px"> Mostrar ocultos
         </label>
@@ -3860,20 +3865,23 @@ function ckPeriodKey(rec,d){ d=d||new Date();
   if(rec==="todo_mes"||rec==="dia_mes") return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
   return "once";
 }
-function ckIsDone(it){
+let _ckViewDate=null; // data de visualização (null = hoje)
+function ckRefKey(){ return _ckViewDate || todayKey(); }
+function ckIsDone(it, ref){
+  ref=ref||ckRefKey();
   if(!it.feito_em) return false;
-  if(it.recorrencia==="unico"||!it.recorrencia) return true;
+  if(it.recorrencia==="unico"||!it.recorrencia) return it.feito_em<=ref; // concluído até a data vista
   const done=new Date(it.feito_em+"T00:00:00");
-  return ckPeriodKey(it.recorrencia,done)===ckPeriodKey(it.recorrencia,new Date());
+  return ckPeriodKey(it.recorrencia,done)===ckPeriodKey(it.recorrencia,new Date(ref+"T00:00:00"));
 }
-// item é relevante HOJE? (fixos em dia específico só aparecem no dia marcado)
-function ckRelevantToday(it){
-  const now=new Date();
-  if(it.recorrencia==="dia_mes" && (it.rec_valor||it.rec_valor===0)) return now.getDate()===it.rec_valor;
-  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return now.getDay()===it.rec_valor;
+// item é relevante na data de referência? (fixos em dia específico só aparecem no dia marcado)
+function ckRelevantToday(it, ref){
+  const d=new Date((ref||ckRefKey())+"T00:00:00");
+  if(it.recorrencia==="dia_mes" && (it.rec_valor||it.rec_valor===0)) return d.getDate()===it.rec_valor;
+  if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return d.getDay()===it.rec_valor;
   return true;
 }
-function ckPending(items){ return (items||[]).filter(it=>ckRelevantToday(it) && !ckIsDone(it)); }
+function ckPending(items){ const ref=todayKey(); return (items||[]).filter(it=>ckRelevantToday(it,ref) && !ckIsDone(it,ref)); }
 function ckRecLabel(it){
   switch(it.recorrencia){
     case "todo_dia": return "todo dia";
@@ -3916,14 +3924,15 @@ function ckItemHtml(it, extra){
 function paintChecklist(){
   const body=document.getElementById("checklistBody"); if(!body) return;
   updateChecklistBadge();
-  const cats=[["diario","Diário"],["semanal","Semanal"],["mensal","Mensal"]];
+  const ref=ckRefKey();
+  const cats=[["unico","Único"],["diario","Diário"],["semanal","Semanal"],["mensal","Mensal"]];
   let html="";
   cats.forEach(([cat,label])=>{
-    // relevantes hoje (fixos em dia específico só aparecem no dia marcado)
-    const relev=_ckCache.filter(i=>(i.categoria||"diario")===cat && ckRelevantToday(i));
-    const active=relev.filter(i=>!ckIsDone(i));
-    // concluídos aparecem só quando "mostrar ocultos" ligado E foram concluídos HOJE
-    const done=_ckShowDone ? relev.filter(i=>ckIsDone(i) && i.feito_em===todayKey()) : [];
+    // relevantes na data de referência (fixos em dia específico só aparecem no dia marcado)
+    const relev=_ckCache.filter(i=>(i.categoria||"diario")===cat && ckRelevantToday(i,ref));
+    const active=relev.filter(i=>!ckIsDone(i,ref));
+    // concluídos aparecem só quando "mostrar ocultos" ligado E concluídos na data vista
+    const done=_ckShowDone ? relev.filter(i=>ckIsDone(i,ref) && i.feito_em===ref) : [];
     const list=active.concat(done);
     html+=`<div class="subcat-h">${label}</div>`;
     if(!list.length){ html+=`<div class="empty">${_ckShowDone?"Nada aqui.":"Nada pendente."}</div>`; return; }
@@ -3931,7 +3940,7 @@ function paintChecklist(){
   });
   // Seção "Agendados": só quando "Mostrar ocultos" está ligado — itens de dia fixo fora do dia
   if(_ckShowDone){
-    const agend=_ckCache.filter(i=>!ckRelevantToday(i))
+    const agend=_ckCache.filter(i=>!ckRelevantToday(i,ref))
       .sort((a,b)=>{ const da=ckNextDate(a), db=ckNextDate(b); return (da?da.getTime():0)-(db?db.getTime():0); });
     html+=`<div class="subcat-h" style="margin-top:14px">📅 Agendados</div>`;
     if(!agend.length){ html+=`<div class="empty">Nenhum agendado.</div>`; }
@@ -3940,7 +3949,7 @@ function paintChecklist(){
   body.innerHTML=html;
   body.querySelectorAll(".ck-toggle[data-id]").forEach(el=>el.addEventListener("click", async ()=>{
     const it=_ckCache.find(x=>x.id===el.dataset.id); if(!it) return;
-    const novo = ckIsDone(it) ? null : todayKey();
+    const novo = ckIsDone(it) ? null : ckRefKey();
     it.feito_em=novo;               // otimista: mostra na hora
     paintChecklist();
     try{ await SB.updateChecklistItem(it.id,{feito_em:novo}); }
@@ -3959,7 +3968,12 @@ async function renderChecklist(){
   await loadCkCache();
   paintChecklist();
 }
-function openChecklist(){ const s=document.getElementById("checklistShade"); if(s) s.classList.add("open"); renderChecklist(); }
+function openChecklist(){
+  const s=document.getElementById("checklistShade"); if(s) s.classList.add("open");
+  _ckViewDate=null;  // sempre abre em "hoje"
+  const dv=document.getElementById("ckViewDate"); if(dv) dv.value=todayKey();
+  renderChecklist();
+}
 (function(){
   const shade=document.getElementById("checklistShade");
   const openB=document.getElementById("checklistBtn"), closeB=document.getElementById("checklistClose");
@@ -3968,6 +3982,11 @@ function openChecklist(){ const s=document.getElementById("checklistShade"); if(
   if(shade) shade.addEventListener("click", e=>{ if(e.target===shade) shade.classList.remove("open"); });
   const showDoneCb=document.getElementById("ckShowDone");
   if(showDoneCb) showDoneCb.addEventListener("change",()=>{ _ckShowDone=showDoneCb.checked; paintChecklist(); });
+  // seletor de data (conferência de outros dias)
+  const dv=document.getElementById("ckViewDate"), dtoday=document.getElementById("ckViewToday");
+  if(dv) dv.addEventListener("change",()=>{ _ckViewDate = (dv.value && dv.value!==todayKey()) ? dv.value : null; paintChecklist(); });
+  if(dtoday) dtoday.addEventListener("click",()=>{ _ckViewDate=null; if(dv) dv.value=todayKey(); paintChecklist(); });
+  const catSel=document.getElementById("ckCategoria"), recWrap=document.getElementById("ckRecWrap");
   const recSel=document.getElementById("ckRecorrencia"), valWrap=document.getElementById("ckValorWrap"), valSel=document.getElementById("ckValor"), valLbl=document.getElementById("ckValorLbl");
   function refreshValor(){
     if(!recSel) return; const r=recSel.value;
@@ -3976,6 +3995,14 @@ function openChecklist(){ const s=document.getElementById("checklistShade"); if(
     else { valWrap.style.display="none"; }
   }
   if(recSel) recSel.addEventListener("change", refreshValor);
+  // categoria "Único": esconde a recorrência (é sempre única)
+  function refreshCat(){
+    if(!catSel||!recWrap) return;
+    if(catSel.value==="unico"){ recWrap.style.display="none"; if(valWrap) valWrap.style.display="none"; }
+    else { recWrap.style.display=""; refreshValor(); }
+  }
+  if(catSel) catSel.addEventListener("change", refreshCat);
+  refreshCat();  // estado inicial (Único selecionado)
   const form=document.getElementById("ckAddForm"), toggleB=document.getElementById("ckAddToggle");
   if(toggleB) toggleB.addEventListener("click", ()=>{
     if(!form) return;
@@ -3987,8 +4014,10 @@ function openChecklist(){ const s=document.getElementById("checklistShade"); if(
   const addB=document.getElementById("ckAdd");
   if(addB) addB.addEventListener("click", ()=>{
     const ti=document.getElementById("ckTitulo"); const t=(ti&&ti.value||"").trim(); if(!t) return;
-    const item={ titulo:t, categoria:document.getElementById("ckCategoria").value, recorrencia:recSel.value };
-    if(item.recorrencia==="dia_mes"||item.recorrencia==="dia_semana") item.rec_valor=parseInt(valSel.value,10);
+    const cat=document.getElementById("ckCategoria").value;
+    const rec = cat==="unico" ? "unico" : recSel.value;
+    const item={ titulo:t, categoria:cat, recorrencia:rec };
+    if(rec==="dia_mes"||rec==="dia_semana") item.rec_valor=parseInt(valSel.value,10);
     SB.addChecklistItem(item).then(()=>{ ti.value=""; if(form) form.style.display="none"; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
   });
 })();
