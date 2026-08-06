@@ -3934,8 +3934,12 @@ function paintChecklist(){
     // concluídos aparecem só quando "mostrar ocultos" ligado E concluídos na data vista
     const done=_ckShowDone ? relev.filter(i=>ckIsDone(i,ref) && i.feito_em===ref) : [];
     const list=active.concat(done);
+    if(!list.length){
+      // compacto: título + "Nada pendente." na mesma linha
+      html+=`<div class="subcat-h" style="display:flex;align-items:baseline;gap:10px;margin:4px 0"><span>${label}</span><span style="font-weight:500;font-size:12px;color:var(--ink-2);text-transform:none;letter-spacing:0">${_ckShowDone?"Nada aqui.":"Nada pendente."}</span></div>`;
+      return;
+    }
     html+=`<div class="subcat-h">${label}</div>`;
-    if(!list.length){ html+=`<div class="empty">${_ckShowDone?"Nada aqui.":"Nada pendente."}</div>`; return; }
     html+=list.map(it=>ckItemHtml(it)).join("");
   });
   // Seção "Agendados": só quando "Mostrar ocultos" está ligado — itens de dia fixo fora do dia
