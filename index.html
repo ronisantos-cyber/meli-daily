@@ -3009,7 +3009,12 @@ const SB = (function(){
     if(error) throw error; return data||[];
   }
   async function addChecklistItem(item){
-    const { error } = await client.from("checklist").insert(item); if(error) throw error;
+    let res = await client.from("checklist").insert(item);
+    if(res.error && /(\bdata\b|column)/i.test(res.error.message||"") && item.data){
+      const copy=Object.assign({},item); delete copy.data;   // coluna 'data' ainda não existe
+      res = await client.from("checklist").insert(copy);
+    }
+    if(res.error) throw res.error;
   }
   async function updateChecklistItem(id, fields){
     const { error } = await client.from("checklist").update(fields).eq("id",id); if(error) throw error;
@@ -3876,7 +3881,9 @@ function ckIsDone(it, ref){
 }
 // item é relevante na data de referência? (fixos em dia específico só aparecem no dia marcado)
 function ckRelevantToday(it, ref){
-  const d=new Date((ref||ckRefKey())+"T00:00:00");
+  ref=ref||ckRefKey();
+  if(it.data) return ref>=it.data;    // tarefa única aparece a partir da data e nos dias seguintes
+  const d=new Date(ref+"T00:00:00");
   if(it.recorrencia==="dia_mes" && (it.rec_valor||it.rec_valor===0)) return d.getDate()===it.rec_valor;
   if(it.recorrencia==="dia_semana" && (it.rec_valor||it.rec_valor===0)) return d.getDay()===it.rec_valor;
   return true;
@@ -3900,6 +3907,7 @@ function updateChecklistBadge(){
   if(n>0){ badge.textContent=n>99?"99+":String(n); badge.style.display=""; } else badge.style.display="none";
 }
 function ckNextDate(it){
+  if(it.data) return new Date(it.data+"T00:00:00");
   const now=new Date(); now.setHours(0,0,0,0);
   if(it.recorrencia==="dia_mes" && it.rec_valor){
     let d=new Date(now.getFullYear(),now.getMonth(),it.rec_valor);
@@ -3914,7 +3922,8 @@ function ckNextDate(it){
 }
 function ckItemHtml(it, extra){
   const done=ckIsDone(it);
-  const rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
+  let rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
+  if(it.data){ const d=new Date(it.data+"T00:00:00"); rec=`<span style="font-size:11px;color:var(--meli-blue);font-weight:700"> · 📅 ${d.getDate()}/${d.getMonth()+1}</span>`; }
   return `<div class="item ${done?"done":""}" style="align-items:center">
     <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
     <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}${extra||""}</div></div>
@@ -4022,6 +4031,8 @@ function openChecklist(){
     const rec = cat==="unico" ? "unico" : recSel.value;
     const item={ titulo:t, categoria:cat, recorrencia:rec };
     if(rec==="dia_mes"||rec==="dia_semana") item.rec_valor=parseInt(valSel.value,10);
+    // tarefa ÚNICA com data selecionada no seletor -> agenda para essa data
+    if(cat==="unico" && _ckViewDate) item.data=_ckViewDate;
     SB.addChecklistItem(item).then(()=>{ ti.value=""; if(form) form.style.display="none"; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
   });
 })();
@@ -4296,7 +4307,7 @@ function renderBolhasSection(box){
 function renderNomesList(box){
   const names=allKnownNames();
   let html='<div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 0 8px">Editar renomeia em <b>todas</b> as folgas e feedbacks. Apagar remove <b>todas</b> as ocorrências.</div>';
-  html+='<div class="list-add-row"><input type="text" id="addNomeInp" placeholder="Novo nome" autocomplete="off" data-lpignore="true"><button id="addNomeBtn">Adicionar</button></div>';
+  html+='<div class="list-add-row"><input type="text" id="addNomeInp" placeholder="Novo nome (vários: separe com ;)" autocomplete="off" data-lpignore="true"><button id="addNomeBtn">Adicionar</button></div>';
   html+= names.length ? names.map(n=>`
     <div class="list-row" data-nome="${escapeHtml(n)}">
       <span class="lr-name">${escapeHtml(n)}</span>
@@ -4305,8 +4316,15 @@ function renderNomesList(box){
     </div>`).join("") : '<div class="empty">Nenhum nome ainda.</div>';
   box.innerHTML=html;
   const inp=box.querySelector("#addNomeInp"), addb=box.querySelector("#addNomeBtn");
-  if(addb) addb.addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v) return;
-    SB.addNome(v).then(()=>refreshGroupAndRender()).then(renderListas).then(()=>sysChat(`Nome "${v}" adicionado.`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  if(addb) addb.addEventListener("click",()=>{
+    const raw=(inp.value||"").trim(); if(!raw) return;
+    const lista=raw.split(";").map(x=>x.trim()).filter(Boolean);
+    if(!lista.length) return;
+    Promise.all(lista.map(n=>SB.addNome(n).catch(()=>{})))
+      .then(()=>refreshGroupAndRender()).then(renderListas)
+      .then(()=>sysChat(lista.length>1?`${lista.length} nomes adicionados.`:`Nome "${lista[0]}" adicionado.`))
+      .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+  });
   box.querySelectorAll(".list-row[data-nome]").forEach(row=>{
     const nome=row.dataset.nome;
     row.querySelector(".nm-edit").addEventListener("click",()=>editNomeInline(row,nome));
@@ -4344,6 +4362,10 @@ function renderTitulosList(box){
     return;
   }
   const rows=(SB.gState.titulos||[]).slice().sort((a,b)=>(a.titulo||"").localeCompare(b.titulo||"","pt",{sensitivity:"base"}));
+  if(!isAdmin()){
+    box.innerHTML = rows.length ? rows.map(r=>`<div class="list-row"><span class="lr-name">${escapeHtml(r.titulo)}</span></div>`).join("") : '<div class="empty">Sem títulos.</div>';
+    return;
+  }
   let html='<div class="list-add-row"><input type="text" id="addTitInp" placeholder="Novo título" autocomplete="off" data-lpignore="true"><button id="addTitBtn">Adicionar</button></div>';
   html+= rows.length ? rows.map(r=>`
     <div class="list-row" data-id="${r.id}" data-tit="${escapeHtml(r.titulo)}">
