@@ -2821,7 +2821,7 @@ const DEFAULT_BOLHAS = ["Picking Continuo","Picking tradicional","Pick to Ship",
 const SB = (function(){
   let client = null;
   let channel = null;
-  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], ferias:[], titulos:[], bolhasOpcoes:[], repBolhas:[], tiposAusencia:[] };
+  const gState = { anotacoes:[], tarefas:[], folgas:[], feedbacks:[], nomes:[], nomesInfo:[], ferias:[], titulos:[], bolhasOpcoes:[], repBolhas:[], tiposAusencia:[] };
 
   function configured(){ return !!(state.sb && state.sb.url && state.sb.anonKey); }
   function loggedIn(){ return !!(state.session && state.session.email); }
@@ -2942,9 +2942,12 @@ const SB = (function(){
     }catch(e){ gState.repBolhas = gState.repBolhas||[]; }
     // dicionário de nomes (best-effort; ignora se a tabela ainda não existe)
     try{
-      const nn = await client.from("nomes").select("nome").in("grupo_id",gids).is("oculto_em",null);
-      gState.nomes = (nn&&nn.data)?nn.data.map(r=>r.nome):[];
-    }catch(e){ gState.nomes = gState.nomes||[]; }
+      let nn = await client.from("nomes").select("nome,aniversario").in("grupo_id",gids).is("oculto_em",null);
+      if(nn.error){ nn = await client.from("nomes").select("nome").in("grupo_id",gids).is("oculto_em",null); }
+      const rows=(nn&&nn.data)?nn.data:[];
+      gState.nomes = rows.map(r=>r.nome);
+      gState.nomesInfo = rows;   // {nome, aniversario}
+    }catch(e){ gState.nomes = gState.nomes||[]; gState.nomesInfo = gState.nomesInfo||[]; }
     // tipos de ausência (Férias/Afastamento/Licença…) — best-effort
     try{
       const ta = await client.from("tipos_ausencia").select("*").in("grupo_id",gids).order("ordem",{ascending:true});
@@ -2954,7 +2957,23 @@ const SB = (function(){
   // registra um nome no dicionário do grupo (acumula; ignora duplicado/erro)
   async function addNome(nome){
     if(!client || !nome || !String(nome).trim()) return;
-    try{ await client.from("nomes").insert({ grupo_id:state.groupId, nome:String(nome).trim() }); }catch(e){}
+    const n=String(nome).trim().toUpperCase();
+    try{ await client.from("nomes").insert({ grupo_id:state.groupId, nome:n }); }catch(e){}
+  }
+  // adiciona nome (MAIÚSCULO) e, se vier aniversário, grava/atualiza mesmo se o nome já existir
+  async function addNomeBday(nome, bday){
+    if(!client || !nome || !String(nome).trim()) return;
+    const n=String(nome).trim().toUpperCase();
+    const base={ grupo_id:state.groupId, nome:n };
+    const row = bday ? Object.assign({ aniversario:bday }, base) : base;
+    let res = await client.from("nomes").insert(row);
+    if(res.error && /aniversario|column/i.test(res.error.message||"") && bday){
+      res = await client.from("nomes").insert(base);   // coluna ainda não existe
+    }
+    if(res.error && bday){
+      // nome já existe -> atualiza só o aniversário
+      try{ await client.from("nomes").update({ aniversario:bday }).eq("grupo_id",state.groupId).ilike("nome",n); }catch(_){}
+    }
   }
   function subscribe(gid, onChange){
     if(!client || !gid) return;
@@ -3005,8 +3024,9 @@ const SB = (function(){
     const { error } = await client.from("atualizacoes").delete().eq("id",id); if(error) throw error;
   }
   async function loadChecklist(){
-    const { data, error } = await client.from("checklist").select("*").order("categoria",{ascending:true}).order("created_at",{ascending:true});
-    if(error) throw error; return data||[];
+    const { data, error } = await client.from("checklist").select("*").order("created_at",{ascending:true});
+    if(error) throw error;
+    return (data||[]).slice().sort((a,b)=>((a.ordem==null?1e9:a.ordem)-(b.ordem==null?1e9:b.ordem)) || 0);
   }
   async function addChecklistItem(item){
     let res = await client.from("checklist").insert(item);
@@ -3102,7 +3122,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, addNomeBday, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     updateFeria, addTipoAusencia, delTipoAusencia, seedTiposAusencia,
@@ -3924,14 +3944,63 @@ function ckItemHtml(it, extra){
   const done=ckIsDone(it);
   let rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
   if(it.data){ const d=new Date(it.data+"T00:00:00"); rec=`<span style="font-size:11px;color:var(--meli-blue);font-weight:700"> · 📅 ${d.getDate()}/${d.getMonth()+1}</span>`; }
-  return `<div class="item ${done?"done":""}" style="align-items:center">
+  return `<div class="item ck-real ${done?"done":""}" data-ckid="${it.id}" style="align-items:center">
     <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
     <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}${extra||""}</div></div>
     <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
   </div>`;
 }
+function ckBirthdays(ref){
+  const rd=new Date((ref||ckRefKey())+"T00:00:00"); const mm=rd.getMonth()+1, dd=rd.getDate();
+  return (SB.gState.nomesInfo||[]).filter(n=>{ if(!n||!n.aniversario) return false; const p=String(n.aniversario).split("-"); return p.length===3 && (+p[1]===mm) && (+p[2]===dd); })
+    .map(n=>n.nome).sort((a,b)=>String(a).localeCompare(String(b),"pt"));
+}
+function persistCkOrder(body){
+  const els=[...body.querySelectorAll(".item.ck-real")];
+  els.forEach((el,idx)=>{
+    const id=el.getAttribute("data-ckid"); const it=_ckCache.find(x=>x.id===id);
+    if(it && it.ordem!==idx){ it.ordem=idx; SB.updateChecklistItem(id,{ordem:idx}).catch(()=>{}); }
+  });
+  _ckCache.sort((a,b)=>((a.ordem==null?1e9:a.ordem)-(b.ordem==null?1e9:b.ordem)));
+}
+function enableCkDrag(body){
+  if(!body || body._dragOn) return; body._dragOn=true;
+  let dragEl=null, timer=null, longPress=false;
+  function itemUnder(y){
+    const items=[...body.querySelectorAll(".item.ck-real")].filter(x=>x!==dragEl);
+    return items.find(it=>{ const r=it.getBoundingClientRect(); return y < r.top + r.height/2; });
+  }
+  function onMove(e){
+    if(!dragEl) return; if(e.cancelable) e.preventDefault();
+    const y=(e.touches?e.touches[0].clientY:e.clientY);
+    const ref=itemUnder(y);
+    if(ref){ if(ref!==dragEl.nextSibling) body.insertBefore(dragEl, ref); }
+    else { if(body.lastElementChild!==dragEl) body.appendChild(dragEl); }
+  }
+  function onUp(){
+    document.removeEventListener("pointermove",onMove); document.removeEventListener("pointerup",onUp);
+    clearTimeout(timer);
+    if(dragEl){ dragEl.style.opacity=""; dragEl.style.boxShadow=""; persistCkOrder(body); paintChecklist(); dragEl=null; }
+  }
+  body.addEventListener("pointerdown",(e)=>{
+    const handle=e.target.closest(".ck-toggle"); if(!handle) return;
+    const item=handle.closest(".item.ck-real"); if(!item) return;
+    longPress=false;
+    timer=setTimeout(()=>{
+      longPress=true; dragEl=item; item.style.opacity="0.7"; item.style.boxShadow="0 4px 14px rgba(0,0,0,.2)";
+      document.addEventListener("pointermove",onMove,{passive:false});
+      document.addEventListener("pointerup",onUp);
+    }, 350);
+  });
+  body.addEventListener("pointermove",()=>{ if(!dragEl) clearTimeout(timer); });   // moveu antes do long-press = scroll
+  body.addEventListener("pointerup",()=>{ if(!dragEl) clearTimeout(timer); });
+  body.addEventListener("pointercancel",()=>{ if(!dragEl) clearTimeout(timer); });
+  // suprime o clique de concluir imediatamente após arrastar
+  body.addEventListener("click",(e)=>{ if(longPress){ e.stopImmediatePropagation(); e.preventDefault(); longPress=false; } }, true);
+}
 function paintChecklist(){
   const body=document.getElementById("checklistBody"); if(!body) return;
+  enableCkDrag(body);
   updateChecklistBadge();
   const ref=ckRefKey();
   const cats=[["unico","Único"],["diario","Diário"],["semanal","Semanal"],["mensal","Mensal"]];
@@ -3943,12 +4012,21 @@ function paintChecklist(){
     // concluídos aparecem só quando "mostrar ocultos" ligado E concluídos na data vista
     const done=_ckShowDone ? relev.filter(i=>ckIsDone(i,ref) && i.feito_em===ref) : [];
     const list=active.concat(done);
-    if(!list.length){
+    // aniversários do dia entram no topo da categoria "Único"
+    let bdayHtml="";
+    if(cat==="unico"){
+      bdayHtml=ckBirthdays(ref).map(nm=>`<div class="item" style="align-items:center;background:#FEF9C3;border-radius:8px">
+        <div class="check" style="visibility:hidden"></div>
+        <div class="item-body" style="min-width:0"><div class="item-title">🎂 ${escapeHtml(nm)} <span style="font-size:11px;color:var(--ink-2)">· aniversário</span></div></div>
+      </div>`).join("");
+    }
+    if(!list.length && !bdayHtml){
       // compacto: título + "Nada pendente." na mesma linha
       html+=`<div class="subcat-h" style="display:flex;align-items:baseline;gap:10px;margin:4px 0"><span>${label}</span><span style="font-weight:500;font-size:12px;color:var(--ink-2);text-transform:none;letter-spacing:0">${_ckShowDone?"Nada aqui.":"Nada pendente."}</span></div>`;
       return;
     }
     html+=`<div class="subcat-h">${label}</div>`;
+    html+=bdayHtml;   // aniversários no topo
     html+=list.map(it=>ckItemHtml(it)).join("");
   });
   // Seção "Agendados": só quando "Mostrar ocultos" está ligado — itens de dia fixo fora do dia
@@ -4304,25 +4382,42 @@ function renderBolhasSection(box){
     });
   });
 }
+function bdayDDMM(iso){ if(!iso) return ""; const p=String(iso).split("-"); return p.length===3?`${p[2]}/${p[1]}`:""; }
+function parseNomesBulk(raw){
+  const toks=String(raw||"").split(";").map(x=>x.trim()).filter(Boolean);
+  const entries=[]; let cur=null;
+  const dre=/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
+  toks.forEach(tk=>{
+    const m=tk.match(dre);
+    if(m && cur){
+      let dd=+m[1], mm=+m[2], yy=+m[3];
+      if(m[3].length<=2) yy = yy<=30 ? 2000+yy : 1900+yy;
+      cur.bday=`${yy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+    } else { cur={ nome:tk.toUpperCase(), bday:null }; entries.push(cur); }
+  });
+  return entries;
+}
 function renderNomesList(box){
   const names=allKnownNames();
-  let html='<div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 0 8px">Editar renomeia em <b>todas</b> as folgas e feedbacks. Apagar remove <b>todas</b> as ocorrências.</div>';
-  html+='<div class="list-add-row"><input type="text" id="addNomeInp" placeholder="Novo nome (vários: separe com ;)" autocomplete="off" data-lpignore="true"><button id="addNomeBtn">Adicionar</button></div>';
-  html+= names.length ? names.map(n=>`
-    <div class="list-row" data-nome="${escapeHtml(n)}">
-      <span class="lr-name">${escapeHtml(n)}</span>
+  const bmap={}; (SB.gState.nomesInfo||[]).forEach(r=>{ if(r&&r.aniversario) bmap[(r.nome||"").toUpperCase()]=r.aniversario; });
+  let html='<div class="info" style="background:#FEF3C7;border-color:#FCD34D;color:#78350F;margin:0 0 8px">Vários de uma vez com <b>;</b> — e uma data logo após o nome vira o <b>aniversário</b> (ex.: <i>ANDREW;01/01/2001;MARIA;26/04/96</i>).</div>';
+  html+='<div class="list-add-row"><input type="text" id="addNomeInp" placeholder="Nome (opcional: ;dd/mm/aaaa)" autocomplete="off" data-lpignore="true"><button id="addNomeBtn">Adicionar</button></div>';
+  html+= names.length ? names.map(n=>{
+    const bd=bmap[(n||"").toUpperCase()];
+    const bt=bd?` <span style="font-size:11px;color:var(--meli-blue);font-weight:700">🎂 ${bdayDDMM(bd)}</span>`:"";
+    return `<div class="list-row" data-nome="${escapeHtml(n)}">
+      <span class="lr-name">${escapeHtml(n)}${bt}</span>
       <button class="lr-btn nm-edit" style="background:var(--meli-blue);color:#fff">Editar</button>
       <button class="lr-btn nm-del" style="background:#EF4444;color:#fff">Apagar</button>
-    </div>`).join("") : '<div class="empty">Nenhum nome ainda.</div>';
+    </div>`; }).join("") : '<div class="empty">Nenhum nome ainda.</div>';
   box.innerHTML=html;
   const inp=box.querySelector("#addNomeInp"), addb=box.querySelector("#addNomeBtn");
   if(addb) addb.addEventListener("click",()=>{
-    const raw=(inp.value||"").trim(); if(!raw) return;
-    const lista=raw.split(";").map(x=>x.trim()).filter(Boolean);
-    if(!lista.length) return;
-    Promise.all(lista.map(n=>SB.addNome(n).catch(()=>{})))
+    const entries=parseNomesBulk(inp.value);
+    if(!entries.length) return;
+    Promise.all(entries.map(e=>SB.addNomeBday(e.nome, e.bday).catch(()=>{})))
       .then(()=>refreshGroupAndRender()).then(renderListas)
-      .then(()=>sysChat(lista.length>1?`${lista.length} nomes adicionados.`:`Nome "${lista[0]}" adicionado.`))
+      .then(()=>sysChat(entries.length>1?`${entries.length} nomes processados.`:`"${entries[0].nome}"${entries[0].bday?" (com aniversário)":""} salvo.`))
       .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
   });
   box.querySelectorAll(".list-row[data-nome]").forEach(row=>{
@@ -4339,7 +4434,7 @@ function editNomeInline(row, nome){
     <div style="display:flex;gap:8px"><button class="e-ok" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar</button><button class="e-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
   row.after(box); const inp=box.querySelector(".e-inp"); inp.focus();
   box.querySelector(".e-no").addEventListener("click",()=>box.remove());
-  box.querySelector(".e-ok").addEventListener("click",()=>{ const novo=(inp.value||"").trim();
+  box.querySelector(".e-ok").addEventListener("click",()=>{ const novo=(inp.value||"").trim().toUpperCase();
     if(!novo||novo.toLowerCase()===nome.toLowerCase()){ box.remove(); return; }
     SB.renameNome(nome,novo).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" renomeado para "${novo}".`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
 }
