@@ -1443,20 +1443,29 @@ function afterChatCreate(){
   if(chatTargetDay){ chatTargetDay=null; updateResumoBadge(); try{ sysChat(`Voltei pra hoje (${formatPretty(todayKey())}).`); }catch(_){} }
 }
 function pickChatDate(){
-  const inp=document.createElement("input");
-  inp.type="date"; inp.max=todayKey(); inp.value=chatDay();
-  inp.style.cssText="position:fixed;left:12px;bottom:80px;opacity:0.01;z-index:9999";
-  document.body.appendChild(inp);
-  const cleanup=()=>{ setTimeout(()=>{ if(inp.parentNode) inp.parentNode.removeChild(inp); },300); };
-  inp.addEventListener("change", ()=>{
-    if(inp.value){ setChatDay(inp.value);
-      if(inp.value!==todayKey()) try{ sysChat(`Modo criação em ${formatPretty(inp.value)}. A próxima anotação/tarefa vai pra esse dia (depois volta pra hoje).`); }catch(_){}
-      else try{ sysChat(`Data voltou pra hoje.`); }catch(_){}
-    }
-    cleanup();
+  if(document.getElementById("chatDateShade")) return;
+  const shade=document.createElement("div"); shade.id="chatDateShade";
+  shade.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px";
+  shade.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+      <div style="font-weight:800;font-size:16px;margin-bottom:4px">Lançar em outra data</div>
+      <div style="font-size:12.5px;color:var(--ink-2);margin-bottom:12px">A próxima anotação/tarefa criada no chat irá para essa data. Depois volta automaticamente para hoje.</div>
+      <input type="date" id="chatDateInp" max="${todayKey()}" value="${chatDay()}" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:12px;font:16px inherit;margin-bottom:14px">
+      <div style="display:flex;gap:8px">
+        <button id="chatDateOk" style="flex:1;background:var(--meli-blue);color:#fff;border:0;border-radius:10px;padding:12px;font:700 14px inherit">Usar esta data</button>
+        <button id="chatDateHoje" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:10px;padding:12px 14px;font:700 14px inherit">Hoje</button>
+      </div>
+    </div>`;
+  document.body.appendChild(shade);
+  const close=()=>{ if(shade.parentNode) shade.parentNode.removeChild(shade); };
+  shade.addEventListener("click",e=>{ if(e.target===shade) close(); });
+  const inp=shade.querySelector("#chatDateInp");
+  shade.querySelector("#chatDateOk").addEventListener("click",()=>{
+    const v=inp.value||todayKey(); setChatDay(v);
+    if(v!==todayKey()) sysChat(`Modo criação em ${formatPretty(v)}. A próxima anotação/tarefa vai pra esse dia (depois volta pra hoje).`);
+    close();
   });
-  inp.addEventListener("blur", cleanup);
-  try{ inp.showPicker(); }catch(_){ inp.focus(); inp.click(); }
+  shade.querySelector("#chatDateHoje").addEventListener("click",()=>{ setChatDay(todayKey()); sysChat("Data voltou pra hoje."); close(); });
+  setTimeout(()=>{ try{ inp.focus(); }catch(_){} }, 60);
 }
 (function(){
   const rb=document.getElementById("btnResumoDia"); if(!rb) return;
