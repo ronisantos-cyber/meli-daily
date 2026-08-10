@@ -2960,6 +2960,9 @@ const SB = (function(){
     const n=String(nome).trim().toUpperCase();
     try{ await client.from("nomes").insert({ grupo_id:state.groupId, nome:n }); }catch(e){}
   }
+  async function setNomeAniversario(nome, bday){
+    try{ await client.from("nomes").update({ aniversario: bday||null }).eq("grupo_id",state.groupId).ilike("nome",String(nome||"").toUpperCase()); }catch(_){}
+  }
   // adiciona nome (MAIÚSCULO) e, se vier aniversário, grava/atualiza mesmo se o nome já existir
   async function addNomeBday(nome, bday){
     if(!client || !nome || !String(nome).trim()) return;
@@ -3122,7 +3125,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, addNomeBday, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, addNomeBday, setNomeAniversario, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     updateFeria, addTipoAusencia, delTipoAusencia, seedTiposAusencia,
@@ -4429,14 +4432,25 @@ function renderNomesList(box){
 function editNomeInline(row, nome){
   if(row.parentNode.querySelector(".nm-editbox")) return;
   const box=document.createElement("div"); box.className="nm-editbox"; box.style.cssText="display:flex;flex-direction:column;gap:6px;padding:4px 2px 10px";
+  const bdayAtual=(function(){ const r=(SB.gState.nomesInfo||[]).find(x=>(x.nome||"").toUpperCase()===String(nome||"").toUpperCase()); return (r&&r.aniversario)||""; })();
   box.innerHTML=`<input type="text" class="e-inp" value="${escapeHtml(nome)}" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
-    <div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px">Renomeia <b>${escapeHtml(nome)}</b> em todas as folgas e feedbacks.</div>
+    <label style="font-size:11px;color:var(--ink-2)">Aniversário</label>
+    <input type="date" class="e-bday" value="${escapeHtml(bdayAtual)}" style="border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
+    <div style="font-size:12px;color:#92400E;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:6px 8px">Renomear afeta <b>${escapeHtml(nome)}</b> em todas as folgas e feedbacks.</div>
     <div style="display:flex;gap:8px"><button class="e-ok" style="background:#10B981;color:#fff;border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Confirmar</button><button class="e-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 14px;font:700 12px inherit">Cancelar</button></div>`;
   row.after(box); const inp=box.querySelector(".e-inp"); inp.focus();
   box.querySelector(".e-no").addEventListener("click",()=>box.remove());
-  box.querySelector(".e-ok").addEventListener("click",()=>{ const novo=(inp.value||"").trim().toUpperCase();
-    if(!novo||novo.toLowerCase()===nome.toLowerCase()){ box.remove(); return; }
-    SB.renameNome(nome,novo).then(refreshGroupAndRender).then(renderListas).then(()=>sysChat(`Nome "${nome}" renomeado para "${novo}".`)).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+  box.querySelector(".e-ok").addEventListener("click",()=>{
+    const novo=(inp.value||"").trim().toUpperCase();
+    const bday=(box.querySelector(".e-bday").value||"").trim();
+    const renomear = novo && novo.toLowerCase()!==nome.toLowerCase();
+    const finalNome = renomear ? novo : nome;
+    const p = renomear ? SB.renameNome(nome,novo) : Promise.resolve();
+    p.then(()=> bday ? SB.addNomeBday(finalNome, bday) : SB.setNomeAniversario(finalNome, null))
+     .then(refreshGroupAndRender).then(renderListas)
+     .then(()=>sysChat(renomear?`Nome "${nome}" atualizado para "${novo}".`:`"${nome}" atualizado.`))
+     .catch(e=>sysChat("Erro: "+sbErrMsg(e)));
+  });
 }
 function delNomeInline(row, nome){
   if(row.parentNode.querySelector(".nm-delbox")) return;
