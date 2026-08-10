@@ -2821,7 +2821,7 @@ const GROUP_TREE = {
   }
 };
 // Títulos pré-definidos de anotação (usados no menu long-press e no atalho de digitar)
-const NOTE_TITLES = ["AT","ABS","Setup_Time","Meal_Accuracy","NET","SLA"];
+const NOTE_TITLES = ["AT","ABS","Setup_Time","Meal_Accuracy","NET","SLA","OOT"];
 // Admin (acesso a Usuários e edição de listas restritas)
 const ADMIN_EMAIL = "roni.santos@mercadolivre.com";
 function isAdmin(){ return !!(state.session && String(state.session.email||"").toLowerCase()===ADMIN_EMAIL); }
@@ -3477,7 +3477,7 @@ function handleGroupCommand(trimmed){
   const fw=trimmed.match(/^(\S+)([\s\S]*)$/);
   if(fw){
     const w=fw[1].toLowerCase();
-    let cano=currentTitles().find(t=>t.toLowerCase()===w);
+    let cano=currentTitles().find(t=>t.toLowerCase()===w) || NOTE_TITLES.find(t=>t.toLowerCase()===w);
     if(!cano && TITLE_ALIASES[w]) cano=TITLE_ALIASES[w];
     if(cano){
       const texto=fw[2].replace(/^[ \t]*\n?/,"").replace(/^[ \t]+/,"");
