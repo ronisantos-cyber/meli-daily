@@ -603,7 +603,7 @@
     <button class="icon-btn" id="refreshBtn" aria-label="Atualizar" style="margin-right:2px">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
     </button>
-    <button class="icon-btn" id="checklistBtn" aria-label="Checklist" style="margin-right:2px;position:relative">
+    <button class="icon-btn" id="checklistBtn" aria-label="Tarefas" style="margin-right:2px;position:relative">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
       <span id="checklistBadge" style="display:none;position:absolute;top:2px;right:2px;min-width:16px;height:16px;background:#EF4444;color:#fff;border-radius:999px;font-size:10px;font-weight:800;line-height:16px;text-align:center;padding:0 3px"></span>
     </button>
@@ -824,9 +824,9 @@
         <input type="checkbox" id="viewMobileToggle" style="width:20px;height:20px">
       </label>
 
-      <h3>Checklist</h3>
+      <h3>Tarefas</h3>
       <label class="row-set" style="cursor:pointer">
-        <div><div class="label">Abrir no Checklist</div><div class="desc">Ao iniciar/retomar, mostra o checklist primeiro</div></div>
+        <div><div class="label">Abrir nas Tarefas</div><div class="desc">Ao iniciar/retomar, mostra as tarefas primeiro</div></div>
         <input type="checkbox" id="ckHomeToggle" style="width:20px;height:20px">
       </label>
       <label class="row-set" style="cursor:pointer">
@@ -995,7 +995,7 @@
   <div class="modal-shade" id="checklistShade">
     <div class="modal" style="max-height:88vh;display:flex;flex-direction:column">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h2 style="margin:0;display:flex;align-items:center;gap:8px"><img src="icon-192-v6.png" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover"> Checklist</h2>
+        <h2 style="margin:0;display:flex;align-items:center;gap:8px"><img src="icon-192-v6.png" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover"> Tarefas</h2>
         <button class="modal-close" id="checklistClose" style="position:static;float:none;margin:0">×</button>
       </div>
       <button id="ckAddToggle" style="background:var(--meli-blue);color:#fff;border:0;border-radius:10px;padding:10px 14px;font:800 14px inherit;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;cursor:pointer">
@@ -3959,8 +3959,25 @@ function ckItemHtml(it, extra){
   return `<div class="item ck-real ${done?"done":""}" data-ckid="${it.id}" style="align-items:center">
     <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
     <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}${extra||""}</div></div>
+    <button class="ck-edit" data-id="${it.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 5px;cursor:pointer;flex-shrink:0">✎</button>
     <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
   </div>`;
+}
+function editChecklistInline(id){
+  const it=_ckCache.find(x=>x.id===id); if(!it) return;
+  const row=document.querySelector('.item.ck-real[data-ckid="'+id+'"]'); if(!row) return;
+  const body=row.querySelector(".item-body"); if(!body || body.querySelector(".ck-edit-inp")) return;
+  const titleEl=body.querySelector(".item-title"); if(titleEl) titleEl.style.display="none";
+  const box=document.createElement("div"); box.style.cssText="display:flex;gap:6px;align-items:center;width:100%";
+  box.innerHTML=`<input type="text" class="ck-edit-inp" style="flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:14px inherit">
+    <button class="ck-edit-ok" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Salvar</button>`;
+  body.appendChild(box);
+  const inp=box.querySelector(".ck-edit-inp"); inp.value=it.titulo||""; inp.focus();
+  const done=()=>{ if(box.parentNode) box.remove(); if(titleEl) titleEl.style.display=""; };
+  const save=()=>{ const v=(inp.value||"").trim(); if(!v||v===it.titulo){ done(); return; }
+    it.titulo=v; SB.updateChecklistItem(id,{titulo:v}).then(paintChecklist).catch(e=>{ alert("Erro: "+sbErrMsg(e)); renderChecklist(); }); };
+  box.querySelector(".ck-edit-ok").addEventListener("click",(e)=>{ e.stopPropagation(); save(); });
+  inp.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); save(); } });
 }
 function ckBirthdays(ref){
   const rd=new Date((ref||ckRefKey())+"T00:00:00"); const mm=rd.getMonth()+1, dd=rd.getDate();
@@ -4058,6 +4075,7 @@ function paintChecklist(){
     try{ await SB.updateChecklistItem(it.id,{feito_em:novo}); }
     catch(e){ alert("Erro: "+sbErrMsg(e)); await renderChecklist(); }
   }));
+  body.querySelectorAll(".ck-edit[data-id]").forEach(el=>el.addEventListener("click",(ev)=>{ ev.stopPropagation(); editChecklistInline(el.dataset.id); }));
   body.querySelectorAll(".ck-del[data-id]").forEach(el=>el.addEventListener("click", async ()=>{
     const id=el.dataset.id;
     _ckCache=_ckCache.filter(x=>x.id!==id);   // otimista
@@ -4135,7 +4153,7 @@ async function ckCheckAndNotify(){
   await loadCkCache(); updateChecklistBadge();
   const pend=ckPending(_ckCache); if(!pend.length) return;
   const body=pend.slice(0,5).map(i=>"• "+i.titulo).join("\n")+(pend.length>5?`\n+${pend.length-5} mais`:"");
-  const title=`✅ ${pend.length} pendência(s) no checklist`;
+  const title=`✅ ${pend.length} pendência(s) nas tarefas`;
   try{
     const reg=navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
     if(reg && reg.showNotification) reg.showNotification(title,{body,icon:"icon-192-v6.png",tag:"checklist-pend"});
@@ -4656,13 +4674,15 @@ function renderFerias(){
   // escala de dias (1,5,10,...) reutilizável
   let scale=""; for(let d=1; d<=lastDay; d++){ const mk=(d===1||d%5===0||d===lastDay); scale+=`<div style="flex:1;text-align:center;font-size:9px;color:var(--ink-2);line-height:1.2">${mk?d:""}</div>`; }
   if(!rows.length){ list.innerHTML=`<div class="empty">Sem ausências em ${MESES_PT[m]} de ${y}.</div>`; return; }
-  list.innerHTML=rows.map(f=>{
+  // agrupa por PESSOA — vários períodos no mesmo mês ficam no mesmo card
+  const byName={};
+  rows.forEach(f=>{ const k=(f.nome||"").toUpperCase(); (byName[k]=byName[k]||[]).push(f); });
+  const periodBlock=(f, idx)=>{
     const dur=daysBetween(f.inicio,f.fim);
     const tipo=f.tipo||"Férias", col=tipoColor(tipo), isFeri=tipoNorm(tipo).includes("feri");
     const cd=feriaCountdown(f);
     const edit=`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;cursor:pointer">✎</button>`;
     const del=`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`;
-    // barra dividida em dias do mês
     let cells="";
     for(let d=1; d<=lastDay; d++){
       const ds=`${y}-${pad2n(m+1)}-${pad2n(d)}`;
@@ -4673,17 +4693,23 @@ function renderFerias(){
       const tdy = ds===today;
       cells+=`<div title="${d}" style="flex:1;height:18px;background:${bg};border-right:1px solid rgba(255,255,255,.75);${tdy?'box-shadow:inset 0 0 0 2px #111;':''}"></div>`;
     }
+    return `<div style="${idx>0?'margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)':''}">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="display:flex;align-items:center;gap:6px"><span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${edit}${del}</span>
+        <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)} · ${dur} dia${dur>1?"s":""}</span>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:${cd.cls};margin:5px 0 4px">${cd.txt}</div>
+      <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--line)">${cells}</div>
+      <div style="display:flex;margin-top:2px">${scale}</div>
+    </div>`;
+  };
+  list.innerHTML=Object.keys(byName).sort((a,b)=>a.localeCompare(b,"pt")).map(nome=>{
+    const periods=byName[nome].slice().sort((a,b)=>(a.inicio||"").localeCompare(b.inicio||""));
     return `<div class="item" style="align-items:flex-start">
       <div class="check" style="visibility:hidden"></div>
       <div class="item-body" style="min-width:0">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="item-title" style="min-width:0;display:flex;align-items:center;gap:6px">${escapeHtml(f.nome)}
-            <span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${edit}${del}</div>
-          <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)} · ${dur} dia${dur>1?"s":""}</span>
-        </div>
-        <div style="font-size:12px;font-weight:700;color:${cd.cls};margin:5px 0 4px">${cd.txt}</div>
-        <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--line)">${cells}</div>
-        <div style="display:flex;margin-top:2px">${scale}</div>
+        <div class="item-title" style="margin-bottom:3px">${escapeHtml(nome)}</div>
+        ${periods.map((f,i)=>periodBlock(f,i)).join("")}
       </div></div>`;
   }).join("");
   list.querySelectorAll(".fer-del[data-id]").forEach(b=>{
