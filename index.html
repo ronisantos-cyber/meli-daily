@@ -4674,42 +4674,53 @@ function renderFerias(){
   // escala de dias (1,5,10,...) reutilizável
   let scale=""; for(let d=1; d<=lastDay; d++){ const mk=(d===1||d%5===0||d===lastDay); scale+=`<div style="flex:1;text-align:center;font-size:9px;color:var(--ink-2);line-height:1.2">${mk?d:""}</div>`; }
   if(!rows.length){ list.innerHTML=`<div class="empty">Sem ausências em ${MESES_PT[m]} de ${y}.</div>`; return; }
-  // agrupa por PESSOA — vários períodos no mesmo mês ficam no mesmo card
+  // agrupa por PESSOA — vários períodos no mesmo mês numa única linha do tempo
   const byName={};
   rows.forEach(f=>{ const k=(f.nome||"").toUpperCase(); (byName[k]=byName[k]||[]).push(f); });
-  const periodBlock=(f, idx)=>{
-    const dur=daysBetween(f.inicio,f.fim);
-    const tipo=f.tipo||"Férias", col=tipoColor(tipo), isFeri=tipoNorm(tipo).includes("feri");
-    const cd=feriaCountdown(f);
-    const edit=`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;cursor:pointer">✎</button>`;
-    const del=`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`;
+  list.innerHTML=Object.keys(byName).sort((a,b)=>a.localeCompare(b,"pt")).map(nome=>{
+    const periods=byName[nome].slice().sort((a,b)=>(a.inicio||"").localeCompare(b.inicio||""));
+    // tipos com editar/apagar por período: "Licença ✎× / Férias ✎×"
+    const badges=periods.map(f=>{
+      const col=tipoColor(f.tipo||"Férias");
+      return `<span style="display:inline-flex;align-items:center;gap:2px">`
+        +`<span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(f.tipo||"Férias")}</span>`
+        +`<button class="fer-edit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 3px;cursor:pointer">✎</button>`
+        +`<button class="fer-del" data-id="${f.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 3px;cursor:pointer">×</button>`
+        +`</span>`;
+    }).join('<span style="color:#bbb;margin:0 3px">/</span>');
+    // datas de cada período
+    const datas=periods.map(f=>{ const dur=daysBetween(f.inicio,f.fim); return `${ddmm(f.inicio)}–${ddmm(f.fim)} · ${dur}d`; }).join(' <span style="color:#bbb">/</span> ');
+    // contagem regressiva: 1º à esquerda, 2º à direita, separados por barra
+    const cds=periods.map(f=>{ const cd=feriaCountdown(f); return `<span style="color:${cd.cls};font-weight:700;font-size:12px">${cd.txt}</span>`; });
+    let cdLine;
+    if(cds.length>=2) cdLine=`<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin:5px 0 4px">${cds[0]}<span style="color:#bbb">|</span>${cds[cds.length-1]}</div>`;
+    else cdLine=`<div style="margin:5px 0 4px">${cds[0]||""}</div>`;
+    // linha do tempo única (cada dia pintado pelo período que o cobre)
     let cells="";
     for(let d=1; d<=lastDay; d++){
       const ds=`${y}-${pad2n(m+1)}-${pad2n(d)}`;
-      const inP = ds>=(f.inicio||"") && ds<=(f.fim||"");
-      let bg;
-      if(inP){ bg=(isFeri && countF[ds]>=3) ? "#DC2626" : col; }
-      else { bg = (ds<today) ? "#E2E5EA" : "#F3F4F6"; }
-      const tdy = ds===today;
+      let bg=(ds<today)?"#E2E5EA":"#F3F4F6";
+      for(const f of periods){
+        if(ds>=(f.inicio||"") && ds<=(f.fim||"")){
+          const isFeri=tipoNorm(f.tipo||"Férias").includes("feri");
+          bg=(isFeri && countF[ds]>=3) ? "#DC2626" : tipoColor(f.tipo||"Férias");
+          break;
+        }
+      }
+      const tdy=ds===today;
       cells+=`<div title="${d}" style="flex:1;height:18px;background:${bg};border-right:1px solid rgba(255,255,255,.75);${tdy?'box-shadow:inset 0 0 0 2px #111;':''}"></div>`;
     }
-    return `<div style="${idx>0?'margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)':''}">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
-        <span style="display:flex;align-items:center;gap:6px"><span style="background:${col};color:#fff;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700">${escapeHtml(tipo)}</span>${edit}${del}</span>
-        <span style="flex-shrink:0;font-size:12px;color:var(--ink-2)">${ddmm(f.inicio)} – ${ddmm(f.fim)} · ${dur} dia${dur>1?"s":""}</span>
-      </div>
-      <div style="font-size:12px;font-weight:700;color:${cd.cls};margin:5px 0 4px">${cd.txt}</div>
-      <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--line)">${cells}</div>
-      <div style="display:flex;margin-top:2px">${scale}</div>
-    </div>`;
-  };
-  list.innerHTML=Object.keys(byName).sort((a,b)=>a.localeCompare(b,"pt")).map(nome=>{
-    const periods=byName[nome].slice().sort((a,b)=>(a.inicio||"").localeCompare(b.inicio||""));
     return `<div class="item" style="align-items:flex-start">
       <div class="check" style="visibility:hidden"></div>
       <div class="item-body" style="min-width:0">
-        <div class="item-title" style="margin-bottom:3px">${escapeHtml(nome)}</div>
-        ${periods.map((f,i)=>periodBlock(f,i)).join("")}
+        <div class="item-title" style="margin-bottom:4px">${escapeHtml(nome)}</div>
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="display:flex;align-items:center;flex-wrap:wrap">${badges}</span>
+          <span style="font-size:11px;color:var(--ink-2)">${datas}</span>
+        </div>
+        ${cdLine}
+        <div style="display:flex;border-radius:6px;overflow:hidden;border:1px solid var(--line)">${cells}</div>
+        <div style="display:flex;margin-top:2px">${scale}</div>
       </div></div>`;
   }).join("");
   list.querySelectorAll(".fer-del[data-id]").forEach(b=>{
