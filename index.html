@@ -13,6 +13,7 @@
 <link rel="icon" type="image/png" href="icon-192-v6.png">
 <link rel="apple-touch-icon" href="icon-192-v6.png">
 <link rel="manifest" href="manifest-v6.webmanifest">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <title>Meli Daily Assistant</title>
 <style>
   html{ color-scheme: light only; }
@@ -848,6 +849,23 @@
         </select>
       </div>
       <div class="info" style="font-size:12px;color:var(--ink-2);margin:2px 0 10px">Os lembretes funcionam com o app aberto ou em segundo plano. Com o app totalmente fechado, o celular pode não disparar (limitação de apps web sem servidor de push).</div>
+
+      <h3>Google Agenda (alarme com app fechado)</h3>
+      <div style="font-size:12px;color:var(--ink-2);margin:0 0 8px">Conecte sua conta Google para que as tarefas <b>com horário</b> virem eventos na sua agenda automaticamente — o Google avisa mesmo com o app fechado.</div>
+      <label style="font-size:11px;color:var(--ink-2)">Client ID do Google (OAuth)</label>
+      <input type="text" id="gcalCidInput" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" data-lpignore="true" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:13px inherit;margin:2px 0 8px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <button id="gcalConnectBtn" class="conn-btn connect">Conectar Google</button>
+        <span id="gcalStatus" style="font-size:12px;color:var(--ink-2)">não conectado</span>
+      </div>
+      <label class="row-set" style="cursor:pointer">
+        <div><div class="label">Adicionar automaticamente</div><div class="desc">Tarefas com horário viram evento no Google Agenda ao serem criadas</div></div>
+        <input type="checkbox" id="gcalAutoToggle" style="width:20px;height:20px">
+      </label>
+      <div id="gcalCalWrap" style="display:none;margin-top:6px">
+        <label style="font-size:11px;color:var(--ink-2)">Agenda de destino</label>
+        <select id="gcalCalSelect" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px"><option value="primary">Principal</option></select>
+      </div>
 
       <h3>Atualizações futuras</h3>
       <div style="display:flex;gap:8px;margin:6px 0 10px">
@@ -3989,6 +4007,69 @@ function gcalUrl(it){
   if(rr) url+="&recur="+encodeURIComponent(rr);
   return url;
 }
+/* ===== Google Agenda (OAuth client-side, sem servidor) ===== */
+function ckRRule(it){
+  if(it.recorrencia==="todo_dia") return "RRULE:FREQ=DAILY";
+  if(it.recorrencia==="toda_semana") return "RRULE:FREQ=WEEKLY";
+  if(it.recorrencia==="dia_semana") return "RRULE:FREQ=WEEKLY;BYDAY="+["SU","MO","TU","WE","TH","FR","SA"][it.rec_valor||0];
+  if(it.recorrencia==="todo_mes") return "RRULE:FREQ=MONTHLY";
+  if(it.recorrencia==="dia_mes") return "RRULE:FREQ=MONTHLY;BYMONTHDAY="+(it.rec_valor||1);
+  return null;
+}
+let _gcalToken=null, _gcalTokenExp=0;
+(function(){ try{ _gcalToken=localStorage.getItem("gcal_tok")||null; _gcalTokenExp=parseInt(localStorage.getItem("gcal_tok_exp")||"0",10)||0; }catch(_){}})();
+function gcalReady(){ return !!(window.google && google.accounts && google.accounts.oauth2); }
+function gcalGetToken(interactive){
+  return new Promise((resolve,reject)=>{
+    if(_gcalToken && Date.now()<_gcalTokenExp-60000) return resolve(_gcalToken);
+    const cid=ckPref("gcal_client_id","").trim();
+    if(!gcalReady()||!cid) return reject(new Error(cid?"Google não carregou":"Client ID não configurado"));
+    let done=false;
+    const tc=google.accounts.oauth2.initTokenClient({
+      client_id:cid, scope:"https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
+      callback:(resp)=>{ if(done)return; done=true; if(resp&&resp.access_token){ _gcalToken=resp.access_token; _gcalTokenExp=Date.now()+((resp.expires_in||3300)*1000); try{localStorage.setItem("gcal_tok",_gcalToken);localStorage.setItem("gcal_tok_exp",String(_gcalTokenExp));}catch(_){}; resolve(_gcalToken); } else reject(new Error("sem token")); },
+      error_callback:(e)=>{ if(done)return; done=true; reject(new Error((e&&e.type)||"erro OAuth")); }
+    });
+    tc.requestAccessToken({prompt: interactive?"consent":""});
+  });
+}
+function gcalConnect(){
+  const cid=ckPref("gcal_client_id","").trim();
+  if(!cid){ alert("Cole primeiro o Client ID do Google nas Configurações."); return; }
+  if(!gcalReady()){ alert("O Google ainda está carregando. Tente de novo em alguns segundos."); return; }
+  gcalGetToken(true).then(()=>{ gcalUpdateStatus(); gcalLoadCalendars(); sysChat("Google Agenda conectado. ✓"); }).catch(e=>alert("Não conectou: "+(e&&e.message||e)));
+}
+function gcalConnected(){ return !!(_gcalToken && Date.now()<_gcalTokenExp-60000); }
+function gcalUpdateStatus(){ const el=document.getElementById("gcalStatus"); if(el) el.textContent = gcalConnected()?"conectado ✓":"não conectado"; const w=document.getElementById("gcalCalWrap"); if(w) w.style.display = gcalConnected()?"block":"none"; }
+async function gcalLoadCalendars(){
+  const sel=document.getElementById("gcalCalSelect"); if(!sel) return;
+  let token; try{ token=await gcalGetToken(false); }catch(_){ return; }
+  try{
+    const r=await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer",{headers:{Authorization:"Bearer "+token}});
+    if(!r.ok) return; const data=await r.json();
+    const cur=ckPref("gcal_calendar_id","primary");
+    const items=(data.items||[]).sort((a,b)=>(b.primary?1:0)-(a.primary?1:0));
+    sel.innerHTML=items.map(c=>`<option value="${escapeHtml(c.id)}" ${c.id===cur?"selected":""}>${escapeHtml(c.summaryOverride||c.summary||c.id)}${c.primary?" (principal)":""}</option>`).join("") || '<option value="primary">Principal</option>';
+  }catch(_){}
+}
+async function gcalInsertEvent(it){
+  try{
+    let token; try{ token=await gcalGetToken(false); }catch(_){ token=await gcalGetToken(true); }
+    const date=ckDueDate(it), hora=(it.hora||"09:00").slice(0,5);
+    const [Y,Mo,D]=date.split("-"), [h,mi]=hora.split(":");
+    const d1=new Date(+Y,+Mo-1,+D,+h,+mi), d2=new Date(d1.getTime()+30*60000);
+    const fmt=d=>`${d.getFullYear()}-${pad2n(d.getMonth()+1)}-${pad2n(d.getDate())}T${pad2n(d.getHours())}:${pad2n(d.getMinutes())}:00`;
+    let tz="America/Sao_Paulo"; try{ tz=Intl.DateTimeFormat().resolvedOptions().timeZone||tz; }catch(_){}
+    const body={ summary:it.titulo||"Tarefa", description:"Criado pelo Meli Daily Assistant",
+      start:{dateTime:fmt(d1),timeZone:tz}, end:{dateTime:fmt(d2),timeZone:tz},
+      reminders:{useDefault:false, overrides:[{method:"popup",minutes:0}]} };
+    const rr=ckRRule(it); if(rr) body.recurrence=[rr];
+    const calId=encodeURIComponent(ckPref("gcal_calendar_id","primary"));
+    const r=await fetch("https://www.googleapis.com/calendar/v3/calendars/"+calId+"/events",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(r.ok){ sysChat(`Adicionado ao Google Agenda: ${it.titulo} (${hora}).`); }
+    else { const t=await r.text(); sysChat("Google Agenda: não deu certo ("+r.status+")."); console.warn("gcal",t); }
+  }catch(e){ sysChat("Google Agenda: "+(e&&e.message||e)); }
+}
 function ckItemHtml(it, extra){
   const done=ckIsDone(it);
   let rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
@@ -4182,7 +4263,9 @@ function openChecklist(){
     // tarefa ÚNICA com data selecionada no seletor -> agenda para essa data
     if(cat==="unico" && _ckViewDate) item.data=_ckViewDate;
     const hi=document.getElementById("ckHora"); if(hi && hi.value) item.hora=hi.value;
-    SB.addChecklistItem(item).then(()=>{ ti.value=""; if(hi) hi.value=""; const hw=document.getElementById("ckHoraWrap"); if(hw) hw.style.display="none"; if(form) form.style.display="none"; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
+    SB.addChecklistItem(item).then(()=>{ ti.value=""; if(hi) hi.value=""; const hw=document.getElementById("ckHoraWrap"); if(hw) hw.style.display="none"; if(form) form.style.display="none";
+      if(item.hora && ckPref("gcal_auto","0")==="1") { try{ gcalInsertEvent(item); }catch(_){} }
+      return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
   });
   const clockB=document.getElementById("ckClock"), horaWrap=document.getElementById("ckHoraWrap");
   if(clockB) clockB.addEventListener("click", async ()=>{
@@ -4247,6 +4330,13 @@ async function ckOnAppReady(){
   if(ckPref("ck_home","0")==="1"){ setTimeout(openChecklist, 350); }
 }
 (function(){
+  const gcid=document.getElementById("gcalCidInput"), gconn=document.getElementById("gcalConnectBtn"), gauto=document.getElementById("gcalAutoToggle");
+  if(gcid){ gcid.value=ckPref("gcal_client_id",""); gcid.addEventListener("change",()=>ckSetPref("gcal_client_id",(gcid.value||"").trim())); }
+  if(gconn){ gconn.addEventListener("click",()=>{ if(gcid) ckSetPref("gcal_client_id",(gcid.value||"").trim()); gcalConnect(); }); }
+  if(gauto){ gauto.checked=ckPref("gcal_auto","0")==="1"; gauto.addEventListener("change",()=>ckSetPref("gcal_auto",gauto.checked?"1":"0")); }
+  const gcalSel=document.getElementById("gcalCalSelect");
+  if(gcalSel) gcalSel.addEventListener("change",()=>ckSetPref("gcal_calendar_id",gcalSel.value||"primary"));
+  try{ gcalUpdateStatus(); if(gcalConnected()) gcalLoadCalendars(); }catch(_){}
   const vm=document.getElementById("viewMobileToggle");
   if(vm){ vm.checked=ckPref("view_mobile","0")==="1"; vm.addEventListener("change",()=>{ ckSetPref("view_mobile",vm.checked?"1":"0"); try{ applyViewMode(); }catch(e){} }); }
   const home=document.getElementById("ckHomeToggle"), notif=document.getElementById("ckNotifToggle"), min=document.getElementById("ckNotifMin");
