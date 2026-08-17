@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FFE600">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -13,7 +15,9 @@
 <link rel="manifest" href="manifest-v6.webmanifest">
 <title>Meli Daily Assistant</title>
 <style>
+  html{ color-scheme: light only; }
   :root{
+    color-scheme: light only;
     --meli-yellow:#FFE600;
     --meli-yellow-dark:#E6CF00;
     --meli-blue:#3483FA;
@@ -1028,7 +1032,15 @@
           <label style="font-size:12px;color:var(--ink-2)" id="ckValorLbl">Dia do mês (1–31)</label>
           <select id="ckValor" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px"></select>
         </div>
-        <button id="ckAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:700 13px inherit">Adicionar</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button id="ckAdd" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:700 13px inherit">Adicionar</button>
+          <button id="ckClock" title="Horário de lembrete" style="margin-left:auto;background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:8px 10px;font:700 14px inherit;cursor:pointer">⏰</button>
+        </div>
+        <div id="ckHoraWrap" style="display:none;margin-top:8px">
+          <label style="font-size:12px;color:var(--ink-2)">Lembrete às</label>
+          <input type="time" id="ckHora" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px">
+          <div style="font-size:11px;color:var(--ink-2);margin-top:4px">A notificação dispara no horário se o app estiver aberto ou em segundo plano.</div>
+        </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:6px">
@@ -3042,8 +3054,8 @@ const SB = (function(){
   }
   async function addChecklistItem(item){
     let res = await client.from("checklist").insert(item);
-    if(res.error && /(\bdata\b|column)/i.test(res.error.message||"") && item.data){
-      const copy=Object.assign({},item); delete copy.data;   // coluna 'data' ainda não existe
+    if(res.error && /(\bdata\b|\bhora\b|\bordem\b|column)/i.test(res.error.message||"")){
+      const copy=Object.assign({},item); delete copy.data; delete copy.hora; delete copy.ordem;  // colunas novas talvez ausentes
       res = await client.from("checklist").insert(copy);
     }
     if(res.error) throw res.error;
@@ -3072,6 +3084,9 @@ const SB = (function(){
     const m=me();
     const { error } = await client.from("folgas").update({ status, aprovador_email:m.email, aprovador_nome:m.nome, decidido_em:new Date().toISOString() }).eq("id",id);
     if(error) throw error;
+  }
+  async function updateFeedback(id, texto){
+    const { error } = await client.from("feedbacks").update({ texto }).eq("id",id); if(error) throw error;
   }
   async function addFeedback(pessoa, texto){
     const m=me();
@@ -3134,7 +3149,7 @@ const SB = (function(){
 
   return { gState, configured, loggedIn, groupMode, nomeFromEmail, init, restoreSession, signInEmail, signOut,
     loadGroups, loadProfiles, upsertProfile, deleteProfile, ensureOwnProfile, pull, subscribe,
-    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, addFeria, addNome, addNomeBday, setNomeAniversario, renameNome, deleteNome,
+    addNote, addTask, updateTask, updateNote, loadAtualizacoes, addAtualizacao, updateAtualizacao, delAtualizacao, loadChecklist, addChecklistItem, updateChecklistItem, delChecklistItem, addFolgaRow, setFolgaStatus, addFeedback, updateFeedback, addFeria, addNome, addNomeBday, setNomeAniversario, renameNome, deleteNome,
     addTitulo, updateTitulo, delTitulo, seedTitulos, purgeOcultos,
     addBolhaOpcao, updateBolhaOpcao, delBolhaOpcao, seedBolhas, addRepBolha, delRepBolha,
     updateFeria, addTipoAusencia, delTipoAusencia, seedTiposAusencia,
@@ -3952,13 +3967,37 @@ function ckNextDate(it){
   }
   return null;
 }
+function ckDueDate(it){
+  if(it.data) return it.data;
+  const nd=ckNextDate(it); if(nd) return fmtDate(nd);
+  return ckRefKey();
+}
+function gcalUrl(it){
+  const date=ckDueDate(it), hora=(it.hora||"09:00").slice(0,5);
+  const [Y,Mo,D]=date.split("-"); const [h,mi]=hora.split(":");
+  const start=`${Y}${Mo}${D}T${h}${mi}00`;
+  const d2=new Date(+Y,+Mo-1,+D,+h,+mi); d2.setMinutes(d2.getMinutes()+30);
+  const end=`${d2.getFullYear()}${pad2n(d2.getMonth()+1)}${pad2n(d2.getDate())}T${pad2n(d2.getHours())}${pad2n(d2.getMinutes())}00`;
+  let tz="America/Sao_Paulo"; try{ tz=Intl.DateTimeFormat().resolvedOptions().timeZone||tz; }catch(_){}
+  let url=`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(it.titulo||"Tarefa")}&dates=${start}/${end}&ctz=${encodeURIComponent(tz)}&details=${encodeURIComponent("Lembrete criado pelo Meli Daily Assistant")}`;
+  let rr=null;
+  if(it.recorrencia==="todo_dia") rr="RRULE:FREQ=DAILY";
+  else if(it.recorrencia==="toda_semana") rr="RRULE:FREQ=WEEKLY";
+  else if(it.recorrencia==="dia_semana") rr="RRULE:FREQ=WEEKLY;BYDAY="+["SU","MO","TU","WE","TH","FR","SA"][it.rec_valor||0];
+  else if(it.recorrencia==="todo_mes") rr="RRULE:FREQ=MONTHLY";
+  else if(it.recorrencia==="dia_mes") rr="RRULE:FREQ=MONTHLY;BYMONTHDAY="+(it.rec_valor||1);
+  if(rr) url+="&recur="+encodeURIComponent(rr);
+  return url;
+}
 function ckItemHtml(it, extra){
   const done=ckIsDone(it);
   let rec = (it.recorrencia&&it.recorrencia!=="unico") ? `<span style="font-size:11px;color:var(--ink-2)"> · ${escapeHtml(ckRecLabel(it))}</span>` : "";
   if(it.data){ const d=new Date(it.data+"T00:00:00"); rec=`<span style="font-size:11px;color:var(--meli-blue);font-weight:700"> · 📅 ${d.getDate()}/${d.getMonth()+1}</span>`; }
+  if(it.hora){ rec+=`<span style="font-size:11px;color:#C77D00;font-weight:700"> · ⏰ ${escapeHtml(it.hora)}</span>`; }
   return `<div class="item ck-real ${done?"done":""}" data-ckid="${it.id}" style="align-items:center">
     <div class="check ck-toggle" data-id="${it.id}" style="cursor:pointer">${done?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':""}</div>
     <div class="item-body" style="min-width:0"><div class="item-title" style="${done?'text-decoration:line-through;color:var(--ink-2)':''}">${escapeHtml(it.titulo||"")}${rec}${extra||""}</div></div>
+    ${it.hora?`<button class="ck-cal" data-id="${it.id}" title="Adicionar ao Google Agenda" style="border:0;background:none;color:#16A34A;font-weight:800;padding:0 4px;cursor:pointer;flex-shrink:0">📅</button>`:""}
     <button class="ck-edit" data-id="${it.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 5px;cursor:pointer;flex-shrink:0">✎</button>
     <button class="ck-del" data-id="${it.id}" title="Apagar" style="border:0;background:none;color:#EF4444;font-weight:800;padding:0 6px;cursor:pointer;flex-shrink:0">×</button>
   </div>`;
@@ -4075,6 +4114,7 @@ function paintChecklist(){
     try{ await SB.updateChecklistItem(it.id,{feito_em:novo}); }
     catch(e){ alert("Erro: "+sbErrMsg(e)); await renderChecklist(); }
   }));
+  body.querySelectorAll(".ck-cal[data-id]").forEach(el=>el.addEventListener("click",(ev)=>{ ev.stopPropagation(); const it=_ckCache.find(x=>x.id===el.dataset.id); if(it){ try{ window.open(gcalUrl(it),"_blank"); }catch(_){ location.href=gcalUrl(it); } } }));
   body.querySelectorAll(".ck-edit[data-id]").forEach(el=>el.addEventListener("click",(ev)=>{ ev.stopPropagation(); editChecklistInline(el.dataset.id); }));
   body.querySelectorAll(".ck-del[data-id]").forEach(el=>el.addEventListener("click", async ()=>{
     const id=el.dataset.id;
@@ -4141,7 +4181,20 @@ function openChecklist(){
     if(rec==="dia_mes"||rec==="dia_semana") item.rec_valor=parseInt(valSel.value,10);
     // tarefa ÚNICA com data selecionada no seletor -> agenda para essa data
     if(cat==="unico" && _ckViewDate) item.data=_ckViewDate;
-    SB.addChecklistItem(item).then(()=>{ ti.value=""; if(form) form.style.display="none"; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
+    const hi=document.getElementById("ckHora"); if(hi && hi.value) item.hora=hi.value;
+    SB.addChecklistItem(item).then(()=>{ ti.value=""; if(hi) hi.value=""; const hw=document.getElementById("ckHoraWrap"); if(hw) hw.style.display="none"; if(form) form.style.display="none"; return renderChecklist(); }).catch(e=>alert("Erro: "+sbErrMsg(e)));
+  });
+  const clockB=document.getElementById("ckClock"), horaWrap=document.getElementById("ckHoraWrap");
+  if(clockB) clockB.addEventListener("click", async ()=>{
+    if(!horaWrap) return;
+    const showing = horaWrap.style.display!=="none";
+    horaWrap.style.display = showing ? "none" : "block";
+    if(!showing){
+      clockB.style.background="#FDE68A";
+      // pede permissão de notificação ao definir horário (o lembrete precisa dela)
+      if(("Notification" in window) && Notification.permission==="default"){ try{ await Notification.requestPermission(); }catch(_){} }
+      const hi=document.getElementById("ckHora"); if(hi) hi.focus();
+    } else { clockB.style.background="#E5E7EB"; }
   });
 })();
 
@@ -4167,8 +4220,30 @@ function ckStartNotifTimer(){
   _ckNotifTimer=setInterval(ckCheckAndNotify, min*60000);
   ckCheckAndNotify();
 }
+/* Lembrete por HORÁRIO da tarefa (dispara com o app aberto/2º plano) */
+let _ckRemTimer=null; const _ckFired=new Set();
+async function ckFire(title, body){
+  try{ const reg=navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if(reg && reg.showNotification) reg.showNotification(title,{body,icon:"icon-192-v6.png",tag:"ck-hora"});
+    else new Notification(title,{body});
+  }catch(_){ try{ new Notification(title,{body}); }catch(__){} }
+}
+function ckCheckTimeReminders(){
+  if(!("Notification" in window) || Notification.permission!=="granted") return;
+  const now=new Date(); const hh=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+  const today=todayKey();
+  (_ckCache||[]).forEach(it=>{
+    if(!it.hora) return;
+    if(it.hora.slice(0,5)!==hh) return;
+    if(!ckRelevantToday(it,today) || ckIsDone(it,today)) return;
+    const key=it.id+"|"+today+"|"+it.hora;
+    if(_ckFired.has(key)) return; _ckFired.add(key);
+    ckFire("⏰ Lembrete de tarefa", it.titulo||"");
+  });
+}
+function ckStartReminderTimer(){ clearInterval(_ckRemTimer); _ckRemTimer=setInterval(ckCheckTimeReminders, 30000); ckCheckTimeReminders(); }
 async function ckOnAppReady(){
-  await loadCkCache(); updateChecklistBadge(); ckStartNotifTimer();
+  await loadCkCache(); updateChecklistBadge(); ckStartNotifTimer(); ckStartReminderTimer();
   if(ckPref("ck_home","0")==="1"){ setTimeout(openChecklist, 350); }
 }
 (function(){
@@ -4587,14 +4662,32 @@ function renderFeedback(){
   const rows=(SB.gState.feedbacks||[]).filter(f=>(f.pessoa||"").toLowerCase()===pessoa.toLowerCase());
   if(!rows.length){ list.innerHTML=`<div class="empty">Sem feedbacks sobre "${escapeHtml(pessoa)}".</div>`; return; }
   list.innerHTML=rows.map(f=>{
-    const del=isMine(f.author_email)?`<button class="fbdel" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;margin-left:4px;cursor:pointer">×</button>`:"";
+    const mine=isMine(f.author_email);
+    const edit=mine?`<button class="fbedit" data-id="${f.id}" title="Editar" style="border:0;background:none;color:var(--meli-blue);font-weight:800;padding:0 4px;margin-left:4px;cursor:pointer">✎</button>`:"";
+    const del=mine?`<button class="fbdel" data-id="${f.id}" style="border:0;background:none;color:#EF4444;font-weight:700;padding:0 4px;cursor:pointer">×</button>`:"";
     const dt=f.created_at?formatPretty(String(f.created_at).slice(0,10)):"";
-    return `<div class="item"><div class="check" style="visibility:hidden"></div>
+    return `<div class="item" data-fbid="${f.id}"><div class="check" style="visibility:hidden"></div>
       <div class="item-body" style="min-width:0">
-        <div style="white-space:pre-wrap;word-break:break-word">${escapeHtml(f.texto||"")}${del}</div>
+        <div class="fbtext" style="white-space:pre-wrap;word-break:break-word">${escapeHtml(f.texto||"")}${edit}${del}</div>
         <div class="item-meta" style="margin-top:4px"><span>${escapeHtml(dt)}</span> · ${authChip(f.author_email)}</div>
       </div></div>`;
   }).join("");
+  list.querySelectorAll(".fbedit[data-id]").forEach(b=>{
+    b.addEventListener("click",(ev)=>{ ev.stopPropagation();
+      const id=b.dataset.id; const f=(SB.gState.feedbacks||[]).find(x=>x.id===id); if(!f) return;
+      const row=b.closest(".item"); const body=row.querySelector(".item-body"); const txt=row.querySelector(".fbtext");
+      if(body.querySelector(".fb-edit-inp")) return; if(txt) txt.style.display="none";
+      const box=document.createElement("div"); box.style.cssText="margin-top:2px";
+      box.innerHTML=`<textarea class="fb-edit-inp" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;min-height:60px"></textarea>
+        <div style="display:flex;gap:6px;margin-top:6px"><button class="fb-ok" style="background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Salvar</button><button class="fb-no" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:6px 12px;font:700 12px inherit">Cancelar</button></div>`;
+      body.insertBefore(box, body.firstChild.nextSibling);
+      const inp=box.querySelector(".fb-edit-inp"); inp.value=f.texto||""; inp.focus();
+      const done=()=>{ if(box.parentNode) box.remove(); if(txt) txt.style.display=""; };
+      box.querySelector(".fb-no").addEventListener("click",done);
+      box.querySelector(".fb-ok").addEventListener("click",()=>{ const v=(inp.value||"").trim(); if(!v){ done(); return; }
+        SB.updateFeedback(id,v).then(refreshGroupAndRender).then(renderFeedback).catch(e=>sysChat("Erro: "+sbErrMsg(e))); });
+    });
+  });
   list.querySelectorAll(".fbdel[data-id]").forEach(b=>{
     let armed=false,tmr=null;
     b.addEventListener("click",(ev)=>{ ev.stopPropagation();
