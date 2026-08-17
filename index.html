@@ -4016,14 +4016,16 @@ function ckRRule(it){
   if(it.recorrencia==="dia_mes") return "RRULE:FREQ=MONTHLY;BYMONTHDAY="+(it.rec_valor||1);
   return null;
 }
+const GCAL_CLIENT_ID="324890721121-m6bthotj7q1b8o6i3424qu637tfe8qcn.apps.googleusercontent.com";
+function gcalCid(){ const v=(ckPref("gcal_client_id","")||"").trim(); return v||GCAL_CLIENT_ID; }
 let _gcalToken=null, _gcalTokenExp=0;
 (function(){ try{ _gcalToken=localStorage.getItem("gcal_tok")||null; _gcalTokenExp=parseInt(localStorage.getItem("gcal_tok_exp")||"0",10)||0; }catch(_){}})();
 function gcalReady(){ return !!(window.google && google.accounts && google.accounts.oauth2); }
 function gcalGetToken(interactive){
   return new Promise((resolve,reject)=>{
     if(_gcalToken && Date.now()<_gcalTokenExp-60000) return resolve(_gcalToken);
-    const cid=ckPref("gcal_client_id","").trim();
-    if(!gcalReady()||!cid) return reject(new Error(cid?"Google não carregou":"Client ID não configurado"));
+    const cid=gcalCid();
+    if(!gcalReady()||!cid) return reject(new Error("Google não carregou"));
     let done=false;
     const tc=google.accounts.oauth2.initTokenClient({
       client_id:cid, scope:"https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
@@ -4034,8 +4036,8 @@ function gcalGetToken(interactive){
   });
 }
 function gcalConnect(){
-  const cid=ckPref("gcal_client_id","").trim();
-  if(!cid){ alert("Cole primeiro o Client ID do Google nas Configurações."); return; }
+  const cid=gcalCid();
+  if(!cid){ alert("Client ID ausente."); return; }
   if(!gcalReady()){ alert("O Google ainda está carregando. Tente de novo em alguns segundos."); return; }
   gcalGetToken(true).then(()=>{ gcalUpdateStatus(); gcalLoadCalendars(); sysChat("Google Agenda conectado. ✓"); }).catch(e=>alert("Não conectou: "+(e&&e.message||e)));
 }
@@ -4331,7 +4333,7 @@ async function ckOnAppReady(){
 }
 (function(){
   const gcid=document.getElementById("gcalCidInput"), gconn=document.getElementById("gcalConnectBtn"), gauto=document.getElementById("gcalAutoToggle");
-  if(gcid){ gcid.value=ckPref("gcal_client_id",""); gcid.addEventListener("change",()=>ckSetPref("gcal_client_id",(gcid.value||"").trim())); }
+  if(gcid){ gcid.value=ckPref("gcal_client_id","")||GCAL_CLIENT_ID; gcid.placeholder="(já configurado)"; gcid.addEventListener("change",()=>ckSetPref("gcal_client_id",(gcid.value||"").trim())); }
   if(gconn){ gconn.addEventListener("click",()=>{ if(gcid) ckSetPref("gcal_client_id",(gcid.value||"").trim()); gcalConnect(); }); }
   if(gauto){ gauto.checked=ckPref("gcal_auto","0")==="1"; gauto.addEventListener("change",()=>ckSetPref("gcal_auto",gauto.checked?"1":"0")); }
   const gcalSel=document.getElementById("gcalCalSelect");
