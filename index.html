@@ -1139,7 +1139,7 @@ const LEGACY_KEY = "mda_state_v1";
 const DEFAULT_SB_URL = "https://dohdqtijuxrflwfffwgn.supabase.co";
 const DEFAULT_SB_KEY = "sb_publishable_JDi0OxQtfFa5onz8DTW_YQ_3eRGIuY_";
 const fmtTime = d => d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-const fmtDate = d => d.toISOString().slice(0,10);
+const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const todayKey = () => fmtDate(new Date());
 
 function cryptoId(){
