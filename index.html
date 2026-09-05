@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FFE600">
+<!-- Google Search Console: troque o content pelo código que o Google fornecer (método "Tag HTML") -->
+<meta name="google-site-verification" content="COLE_AQUI_O_CODIGO_DO_GOOGLE">
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light">
 <meta name="mobile-web-app-capable" content="yes">
@@ -712,12 +714,24 @@
         <!-- Visão FÉRIAS -->
         <div id="feriasView" style="display:none">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 10px;gap:8px">
-            <div style="font-weight:800;font-size:16px;text-transform:capitalize" id="feriasMonthLabel">—</div>
-            <div style="display:flex;gap:6px;align-items:center">
+            <div style="display:flex;gap:6px;align-items:center;min-width:0">
+              <div style="font-weight:800;font-size:16px;text-transform:capitalize" id="feriasMonthLabel">—</div>
               <button class="nav" id="feriasPrev" aria-label="Mês anterior">‹</button>
               <button class="nav" id="feriasNext" aria-label="Próximo mês">›</button>
-              <button id="feriasAdd" aria-label="Adicionar férias" style="width:34px;height:34px;border-radius:50%;border:0;background:var(--meli-blue);color:#fff;font:700 20px inherit;line-height:1;cursor:pointer">+</button>
             </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button id="feriasAdd" aria-label="Adicionar férias" style="width:34px;height:34px;border-radius:50%;border:0;background:var(--meli-blue);color:#fff;font:700 20px inherit;line-height:1;cursor:pointer">+</button>
+              <button id="feriasCfg" aria-label="Configurar limite" title="Limite do marcador vermelho" style="width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink);font:16px inherit;line-height:1;cursor:pointer">⚙</button>
+            </div>
+          </div>
+          <div id="feriasCfgBox" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 4px 10px">
+            <label style="font-size:11px;color:var(--ink-2)">Marcar em vermelho quando houver, no mesmo dia, este número de férias ou mais:</label>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+              <input type="number" id="feriasLimiteInput" min="2" max="99" step="1" style="width:80px;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit">
+              <button id="feriasLimiteSave" style="flex:1;background:var(--meli-blue);color:#fff;border:0;border-radius:8px;padding:9px;font:700 13px inherit">Salvar</button>
+              <button id="feriasLimiteCancel" style="background:#E5E7EB;color:var(--ink);border:0;border-radius:8px;padding:9px 14px;font:700 13px inherit">Cancelar</button>
+            </div>
+            <div style="font-size:11px;color:var(--ink-2);margin-top:6px">Só conta ausências do tipo <b>Férias</b>. Vale só para os dias sobrepostos.</div>
           </div>
           <div id="feriasAddForm" style="display:none;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 4px 10px">
             <input type="text" id="feriaNomeInput" list="nameBase" placeholder="Nome" autocapitalize="words" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;font:14px inherit;margin-bottom:6px">
@@ -866,6 +880,7 @@
         <label style="font-size:11px;color:var(--ink-2)">Agenda de destino</label>
         <select id="gcalCalSelect" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:14px inherit;margin-top:2px"><option value="primary">Principal</option></select>
       </div>
+      <div style="font-size:11px;margin-top:8px"><a href="privacy.html" target="_blank" rel="noopener" style="color:var(--meli-blue)">Política de privacidade</a></div>
 
       <h3>Atualizações futuras</h3>
       <div style="display:flex;gap:8px;margin:6px 0 10px">
@@ -2251,7 +2266,7 @@ document.getElementById("nextDay").addEventListener("click", ()=>shiftDate(1));
 document.getElementById("todayBtn").addEventListener("click", ()=>{ dateInput.value=todayKey(); renderTasksView(); });
 
 function shiftDate(delta){
-  const d = new Date(dateInput.value || todayKey());
+  const d = new Date((dateInput.value || todayKey())+"T00:00:00");
   d.setDate(d.getDate()+delta);
   dateInput.value = fmtDate(d);
   renderTasksView();
@@ -4836,7 +4851,13 @@ function fillTipoSelect(){
   sel.innerHTML=tipos.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
   if(cur && tipos.includes(cur)) sel.value=cur;
 }
+/* limite de férias sobrepostas para pintar o dia de vermelho (padrão 3) */
+function feriasLimite(){
+  const v=parseInt(ckPref("ferias_limite_vermelho","3"),10);
+  return (isFinite(v) && v>=2) ? v : 3;
+}
 function renderFerias(){
+  const LIM=feriasLimite();
   const lbl=document.getElementById("feriasMonthLabel");
   const list=document.getElementById("feriasList");
   if(!list) return;
@@ -4888,7 +4909,7 @@ function renderFerias(){
       for(const f of periods){
         if(ds>=(f.inicio||"") && ds<=(f.fim||"")){
           const isFeri=tipoNorm(f.tipo||"Férias").includes("feri");
-          bg=(isFeri && countF[ds]>=3) ? "#DC2626" : tipoColor(f.tipo||"Férias");
+          bg=(isFeri && countF[ds]>=LIM) ? "#DC2626" : tipoColor(f.tipo||"Férias");
           break;
         }
       }
@@ -4961,6 +4982,26 @@ function openFeriaEdit(id){
   if(next) next.addEventListener("click",()=>{ feriasCursor.m++; if(feriasCursor.m>11){feriasCursor.m=0;feriasCursor.y++;} renderFerias(); });
   if(addB) addB.addEventListener("click",()=>{ if(form) form.style.display = form.style.display==="none"?"":"none"; refreshNameBase(); try{ fillTipoSelect(); }catch(e){} });
   if(cancelB) cancelB.addEventListener("click",()=>{ if(form) form.style.display="none"; });
+  // engrenagem: limite de férias sobrepostas p/ pintar de vermelho
+  const cfgB=document.getElementById("feriasCfg"), cfgBox=document.getElementById("feriasCfgBox");
+  const limInp=document.getElementById("feriasLimiteInput");
+  const limSave=document.getElementById("feriasLimiteSave"), limCancel=document.getElementById("feriasLimiteCancel");
+  if(cfgB) cfgB.addEventListener("click",()=>{
+    if(!cfgBox) return;
+    const showing = cfgBox.style.display==="none";
+    cfgBox.style.display = showing ? "" : "none";
+    if(showing){ if(form) form.style.display="none"; if(limInp) limInp.value=feriasLimite(); }
+  });
+  if(limCancel) limCancel.addEventListener("click",()=>{ if(cfgBox) cfgBox.style.display="none"; });
+  if(limSave) limSave.addEventListener("click",()=>{
+    let v=parseInt((limInp&&limInp.value)||"",10);
+    if(!isFinite(v) || v<2){ sysChat("Informe um número a partir de 2."); return; }
+    if(v>99) v=99;
+    ckSetPref("ferias_limite_vermelho", String(v));
+    if(cfgBox) cfgBox.style.display="none";
+    renderFerias();
+    sysChat(`Marcador vermelho a partir de ${v} férias no mesmo dia.`);
+  });
   if(saveB) saveB.addEventListener("click",()=>{
     if(!SB.groupMode()){ sysChat("Entre num grupo pra lançar férias."); return; }
     const nome=(document.getElementById("feriaNomeInput").value||"").trim();
